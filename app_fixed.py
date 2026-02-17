@@ -5,6 +5,7 @@
 # - For EACH kid: Morning + Evening checkbox questions (mobile friendly)
 # - OUTPUT: Appends ONE ROW PER KID into "uKids Kids responses"
 #           columns: timestamp | Availability month | Family Surname | Serving kid | <service labels...>
+# - DEADLINES: pulled from "Kids Deadlines" tab
 
 import time
 import random
@@ -59,9 +60,9 @@ st.markdown(
 # ──────────────────────────────────────────────────────────────────────────────
 # Google Sheets tabs
 # ──────────────────────────────────────────────────────────────────────────────
-TAB_RESPONSES = "uKids Kids responses"   # ✅ output tab (rows per kid)
-TAB_SB = "uKids Kids SB"                 # ✅ your family/kids SB
-TAB_DEADLINES = "Deadlines"
+TAB_RESPONSES = "uKids Kids responses"
+TAB_SB = "uKids Kids SB"
+TAB_DEADLINES = "Kids Deadlines"          # ✅ CHANGED HERE
 TAB_DATES = "Kids & Guys ServiceDates"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -195,13 +196,6 @@ def fetch_service_dates_df() -> pd.DataFrame:
     return ws_get_df(ws)
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def fetch_responses_df() -> pd.DataFrame:
-    sh = get_spreadsheet()
-    ws = ensure_worksheet(sh, TAB_RESPONSES, rows=8000, cols=400)
-    return ws_get_df(ws)
-
-
 def append_response_row(desired_header: list[str], row_map: dict):
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_RESPONSES, rows=8000, cols=max(400, len(desired_header) + 10))
@@ -211,7 +205,7 @@ def append_response_row(desired_header: list[str], row_map: dict):
 
 
 def clear_caches():
-    for fn in (fetch_sb_df, fetch_deadlines_df, fetch_service_dates_df, fetch_responses_df):
+    for fn in (fetch_sb_df, fetch_deadlines_df, fetch_service_dates_df):
         try:
             fn.clear()
         except Exception:
@@ -363,10 +357,8 @@ if month_dates.empty:
 month_dates["_sort"] = month_dates["date"].map(_safe_parse_date_ymd)
 month_dates = month_dates.sort_values("_sort").drop(columns=["_sort"])
 
-# Service label columns we must write to the sheet
 date_labels = month_dates["label"].astype(str).tolist()
 
-# Split (relies on "morning"/"evening" in label text)
 morning_labels = [l for l in date_labels if "morning" in l.lower()]
 evening_labels = [l for l in date_labels if "evening" in l.lower()]
 
@@ -388,7 +380,6 @@ def get_deadline_for_target_month(deadlines: pd.DataFrame, month_key: str):
 
 deadline_dt, deadline_tz = get_deadline_for_target_month(deadlines_df, target_month_key)
 
-# Closed check
 is_closed = True
 if deadline_dt is not None:
     now_local = get_now_in_tz(deadline_tz)
@@ -399,7 +390,6 @@ if is_closed:
     st.markdown(f"## 🔒 {target_month_name} availability submissions are now closed.")
     st.stop()
 
-# Info header
 now_local = get_now_in_tz(deadline_tz)
 remaining_seconds = (deadline_dt - now_local).total_seconds()
 
@@ -468,13 +458,11 @@ if not kids:
 
 st.subheader(f"Availability for {target_month_key}")
 
-# We collect selections per kid: kid_name -> set(actual_label)
 kids_selected_map: dict[str, set[str]] = {}
 
 for idx, kid_name in enumerate(kids, start=1):
     st.markdown(f"## 👦 {kid_name}")
 
-    # Morning
     st.markdown("### Which morning services are you available?")
     m1, m2 = st.columns(2)
     with m1:
@@ -494,7 +482,6 @@ for idx, kid_name in enumerate(kids, start=1):
 
     st.divider()
 
-    # Evening
     st.markdown("### Which evening services are you available?")
     e1, e2 = st.columns(2)
     with e1:
@@ -512,28 +499,22 @@ for idx, kid_name in enumerate(kids, start=1):
         if st.checkbox(opt, key=key):
             chosen_e.append(opt)
 
-    # Convert display -> actual labels
     selected_morning_labels = {morning_display_map[d] for d in chosen_m if d in morning_display_map}
     selected_evening_labels = {evening_display_map[d] for d in chosen_e if d in evening_display_map}
     kids_selected_map[kid_name] = selected_morning_labels.union(selected_evening_labels)
 
     st.divider()
 
-# Review
 st.subheader("Review")
 st.write(f"**Family:** {answers.get('FAMILY_SURNAME')}")
 for kid_name in kids:
     st.write(f"- **{kid_name}:** {len(kids_selected_map.get(kid_name, set()))} services selected")
 
-# ─────────────────────────────────────────────────────────────
-# Submit (sticky)
-# ─────────────────────────────────────────────────────────────
 st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
 submitted = st.button("Submit")
 st.markdown("</div>", unsafe_allow_html=True)
 
 if submitted:
-    # Hard deadline check
     now_check = get_now_in_tz(deadline_tz)
     if (deadline_dt - now_check).total_seconds() <= 0:
         st.error("Form is closed.")
@@ -544,18 +525,13 @@ if submitted:
         st.error("Please select your family surname.")
         st.stop()
 
-    # ✅ One timestamp shared for all kids in this submission (like your screenshot)
     now_iso = datetime.utcnow().isoformat() + "Z"
 
-    # ✅ Desired header EXACTLY like your example + service columns
     desired_header = ["timestamp", "Availability month", "Family Surname", "Serving kid"] + date_labels
 
     try:
-        # ✅ Append ONE ROW PER KID
         for kid_name in kids:
             selected = kids_selected_map.get(kid_name, set())
-
-            # Yes/No for each service column (same format as guys)
             yes_map = {lbl: ("Yes" if lbl in selected else "No") for lbl in date_labels}
 
             row_map = {
@@ -569,32 +545,7 @@ if submitted:
             append_response_row(desired_header, row_map)
 
         clear_caches()
-        st.success("Submission saved to Google Sheets (one row per child).")
+        st.success("Submission saved to Google Sheets (Kids Deadlines tab used).")
 
     except Exception as e:
         st.error(f"Failed to save submission: {e}")
-
-# ─────────────────────────────────────────────────────────────
-# Admin (optional)
-# ─────────────────────────────────────────────────────────────
-with st.expander("Admin"):
-    st.caption("Mode: Google Sheets (kids tabs)")
-
-    if not ADMIN_KEY:
-        st.info("Admin key is not set (ADMIN_KEY). Admin view is open to anyone with the link.")
-
-    key = st.text_input("Enter admin key to access exports", type="password")
-    if ADMIN_KEY and key != ADMIN_KEY:
-        if key:
-            st.error("Incorrect admin key.")
-    else:
-        st.success("Admin unlocked.")
-        try:
-            responses_df = fetch_responses_df()
-        except Exception as e:
-            st.error(f"Could not load responses: {e}")
-            responses_df = pd.DataFrame()
-
-        st.write(f"Total submissions (all months): **{len(responses_df)}**")
-        if not responses_df.empty:
-            st.dataframe(responses_df, use_container_width=True)
