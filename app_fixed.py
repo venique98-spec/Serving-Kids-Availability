@@ -6,6 +6,7 @@
 # - OUTPUT: Appends ONE ROW PER KID into "uKids Kids responses"
 #           columns: timestamp | Availability month | Family Surname | Serving kid | <service labels...>
 # - DEADLINES: pulled from "Kids Deadlines" tab
+# - UI: Each child wrapped in a bordered "card"
 
 import time
 import random
@@ -52,6 +53,26 @@ st.markdown(
     position: sticky; bottom: 0; z-index: 999;
     background: #fff; padding: 10px 0; border-top: 1px solid #eee;
   }
+
+  /* ✅ Kid cards */
+  .kid-card {
+    border: 1px solid #e6e6e6;
+    border-radius: 14px;
+    padding: 18px 16px;
+    margin: 16px 0 22px 0;
+    background: #fafafa;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  }
+  .kid-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 10px 0;
+  }
+  .kid-subtitle {
+    font-size: 14px;
+    opacity: 0.75;
+    margin: 0 0 12px 0;
+  }
 </style>
 """,
     unsafe_allow_html=True,
@@ -62,7 +83,7 @@ st.markdown(
 # ──────────────────────────────────────────────────────────────────────────────
 TAB_RESPONSES = "uKids Kids responses"
 TAB_SB = "uKids Kids SB"
-TAB_DEADLINES = "Kids Deadlines"          # ✅ CHANGED HERE
+TAB_DEADLINES = "Kids Deadlines"
 TAB_DATES = "Kids & Guys ServiceDates"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -461,7 +482,10 @@ st.subheader(f"Availability for {target_month_key}")
 kids_selected_map: dict[str, set[str]] = {}
 
 for idx, kid_name in enumerate(kids, start=1):
-    st.markdown(f"## 👦 {kid_name}")
+    # ✅ Card wrapper start
+    st.markdown('<div class="kid-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="kid-title">{kid_name}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="kid-subtitle">Select all services this child is available for.</div>', unsafe_allow_html=True)
 
     st.markdown("### Which morning services are you available?")
     m1, m2 = st.columns(2)
@@ -503,7 +527,8 @@ for idx, kid_name in enumerate(kids, start=1):
     selected_evening_labels = {evening_display_map[d] for d in chosen_e if d in evening_display_map}
     kids_selected_map[kid_name] = selected_morning_labels.union(selected_evening_labels)
 
-    st.divider()
+    # ✅ Card wrapper end
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.subheader("Review")
 st.write(f"**Family:** {answers.get('FAMILY_SURNAME')}")
@@ -545,7 +570,7 @@ if submitted:
             append_response_row(desired_header, row_map)
 
         clear_caches()
-        st.success("Submission saved to Google Sheets (Kids Deadlines tab used).")
+        st.success("Submission saved to Google Sheets.")
 
     except Exception as e:
         st.error(f"Failed to save submission: {e}")
