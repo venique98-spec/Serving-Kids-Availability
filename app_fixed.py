@@ -1,12 +1,9 @@
 # app_fixed.py
 # uKids Kids Availability Form
-# - Family surname dropdown
-# - Auto-detect kids (Kid #1, Kid #2, Kid #3...) from "uKids Kids SB"
-# - For EACH kid: Morning + Evening checkbox questions (mobile friendly)
-# - OUTPUT: Appends ONE ROW PER KID into "uKids Kids responses"
-#           columns: timestamp | Availability month | Family Surname | Serving kid | <service labels...>
-# - DEADLINES: pulled from "Kids Deadlines" tab
-# - UI: Each child wrapped in a bordered "card"
+# ✅ SB input supports: Family Surname | Kid #1 | Age | Kid #2 | Age | Kid #3 | Age ...
+# ✅ Age is NOT shown on the form
+# ✅ Age IS written to output (one row per child) in "uKids Kids responses"
+# ✅ Deadlines pulled from "Kids Deadlines"
 
 import time
 import random
@@ -15,13 +12,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-# ✅ Timezone-aware deadlines
 try:
     from zoneinfo import ZoneInfo
 except Exception:
-    ZoneInfo = None  # fallback
+    ZoneInfo = None
 
-# Optional: Google Sheets libs.
 try:
     import gspread
     from gspread.exceptions import APIError, WorksheetNotFound
@@ -35,9 +30,6 @@ except Exception:
         ...
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# UI CONFIG + mobile tweaks
-# ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="uKids Kids Availability Form", page_icon="🗓️", layout="centered")
 st.title("🗓️ uKids Kids Availability Form")
 
@@ -53,44 +45,18 @@ st.markdown(
     position: sticky; bottom: 0; z-index: 999;
     background: #fff; padding: 10px 0; border-top: 1px solid #eee;
   }
-
-  /* ✅ Kid cards */
-  .kid-card {
-    border: 1px solid #e6e6e6;
-    border-radius: 14px;
-    padding: 18px 16px;
-    margin: 16px 0 22px 0;
-    background: #fafafa;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-  }
-  .kid-title {
-    font-size: 20px;
-    font-weight: 700;
-    margin: 0 0 10px 0;
-  }
-  .kid-subtitle {
-    font-size: 14px;
-    opacity: 0.75;
-    margin: 0 0 12px 0;
-  }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Google Sheets tabs
-# ──────────────────────────────────────────────────────────────────────────────
 TAB_RESPONSES = "uKids Kids responses"
 TAB_SB = "uKids Kids SB"
 TAB_DEADLINES = "Kids Deadlines"
 TAB_DATES = "Kids & Guys ServiceDates"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Secrets helpers
-# ──────────────────────────────────────────────────────────────────────────────
+
 def _get_secret_any(*paths):
-    """Try multiple secret paths, return the first value found."""
     try:
         cur = st.secrets
     except Exception:
@@ -109,14 +75,6 @@ def _get_secret_any(*paths):
     return None
 
 
-def get_admin_key() -> str:
-    v = _get_secret_any(["ADMIN_KEY"], ["general", "ADMIN_KEY"])
-    return str(v) if v else ""
-
-
-ADMIN_KEY = get_admin_key()
-
-
 def is_sheets_enabled() -> bool:
     if gspread is None:
         return False
@@ -130,9 +88,6 @@ if not is_sheets_enabled():
     st.stop()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Google Sheets helpers
-# ──────────────────────────────────────────────────────────────────────────────
 def gs_retry(func, *args, **kwargs):
     for attempt in range(5):
         try:
@@ -147,13 +102,8 @@ def gs_retry(func, *args, **kwargs):
 
 @st.cache_resource
 def get_spreadsheet():
-    """
-    Open the spreadsheet and return gspread Spreadsheet object.
-    Includes private_key newline fixer.
-    """
     sa = _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
     sheet_id = _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
-
     if not sa or not sheet_id:
         raise RuntimeError("Missing GSHEET_ID or gcp_service_account in secrets.")
 
@@ -176,12 +126,25 @@ def ensure_worksheet(sh, title: str, rows: int = 2000, cols: int = 50):
         return sh.add_worksheet(title=title, rows=rows, cols=cols)
 
 
-def ws_get_df(ws) -> pd.DataFrame:
+def make_unique_headers(header: list[str]) -> list[str]:
+    counts = {}
+    out = []
+    for h in header:
+        base = str(h).strip() or "Unnamed"
+        counts[base] = counts.get(base, 0) + 1
+        out.append(base if counts[base] == 1 else f"{base}_{counts[base]}")
+    return out
+
+
+def ws_get_values_and_df(ws) -> tuple[list[str], list[str], pd.DataFrame]:
     values = gs_retry(ws.get_all_values)
     if not values:
-        return pd.DataFrame()
-    header, rows = values[0], values[1:]
-    return pd.DataFrame(rows, columns=header)
+        return [], [], pd.DataFrame()
+    header_raw = values[0]
+    header_unique = make_unique_headers(header_raw)
+    rows = values[1:]
+    df = pd.DataFrame(rows, columns=header_unique)
+    return header_raw, header_unique, df
 
 
 def ws_ensure_header(ws, desired_header: list[str]) -> list[str]:
@@ -197,24 +160,26 @@ def ws_ensure_header(ws, desired_header: list[str]) -> list[str]:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def fetch_sb_df() -> pd.DataFrame:
+def fetch_sb_raw_unique_df():
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=50)
-    return ws_get_df(ws)
+    return ws_get_values_and_df(ws)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_deadlines_df() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_DEADLINES, rows=500, cols=10)
-    return ws_get_df(ws)
+    _, _, df = ws_get_values_and_df(ws)
+    return df
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_service_dates_df() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_DATES, rows=4000, cols=20)
-    return ws_get_df(ws)
+    _, _, df = ws_get_values_and_df(ws)
+    return df
 
 
 def append_response_row(desired_header: list[str], row_map: dict):
@@ -226,7 +191,7 @@ def append_response_row(desired_header: list[str], row_map: dict):
 
 
 def clear_caches():
-    for fn in (fetch_sb_df, fetch_deadlines_df, fetch_service_dates_df):
+    for fn in (fetch_sb_raw_unique_df, fetch_deadlines_df, fetch_service_dates_df):
         try:
             fn.clear()
         except Exception:
@@ -237,9 +202,6 @@ def clear_caches():
         pass
 
 
-# ─────────────────────────────────────────────────────────────
-# Time helpers
-# ─────────────────────────────────────────────────────────────
 def get_now_in_tz(tz_name: str) -> datetime:
     if ZoneInfo is None:
         return datetime.utcnow()
@@ -248,13 +210,8 @@ def get_now_in_tz(tz_name: str) -> datetime:
 
 def add_one_month(dt: datetime) -> datetime:
     y, m = dt.year, dt.month
-    if m == 12:
-        y2, m2 = y + 1, 1
-    else:
-        y2, m2 = y, m + 1
-    if dt.tzinfo:
-        return datetime(y2, m2, 1, tzinfo=dt.tzinfo)
-    return datetime(y2, m2, 1)
+    y2, m2 = (y + 1, 1) if m == 12 else (y, m + 1)
+    return datetime(y2, m2, 1, tzinfo=dt.tzinfo) if dt.tzinfo else datetime(y2, m2, 1)
 
 
 def get_target_month_key(now_local: datetime) -> str:
@@ -283,15 +240,13 @@ def _safe_parse_date_ymd(s: str) -> datetime:
 
 
 def _is_truthy_service_day(v) -> bool:
-    s = str(v).strip().lower()
-    return s in ("1", "true", "yes", "y", "t")
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "t")
 
 
 def _display_date_only(label: str) -> str:
     s = str(label).strip()
     s = s.replace("Morning Service", "").replace("Evening Service", "")
-    s = s.replace("Morning", "").replace("Evening", "")
-    s = s.replace("Service", "")
+    s = s.replace("Morning", "").replace("Evening", "").replace("Service", "")
     return " ".join(s.split()).strip(" -")
 
 
@@ -313,31 +268,47 @@ def _build_display_map(labels: list[str]) -> dict:
 # Load config
 # ─────────────────────────────────────────────────────────────
 try:
-    sb_df = fetch_sb_df()
+    sb_header_raw, sb_header_unique, sb_df = fetch_sb_raw_unique_df()
     deadlines_df = fetch_deadlines_df()
     service_dates_all = fetch_service_dates_df()
 except Exception as e:
     st.error(f"Failed to load config from Google Sheets: {e}")
     st.stop()
 
-# Validate required columns
-for df, tab, needed in [
-    (deadlines_df, TAB_DEADLINES, {"month", "deadline_local", "timezone"}),
-    (service_dates_all, TAB_DATES, {"target_month", "date", "label", "is_service_day"}),
+# Required columns
+for needed, tab, df in [
+    ({"month", "deadline_local", "timezone"}, TAB_DEADLINES, deadlines_df),
+    ({"target_month", "date", "label", "is_service_day"}, TAB_DATES, service_dates_all),
 ]:
     miss = needed - set(df.columns)
     if miss:
         st.error(f"Google Sheet tab '{tab}' is missing columns: {', '.join(sorted(miss))}")
         st.stop()
 
-# Validate SB columns
-sb_needed = {"Family Surname", "Kid #1"}
-miss_sb = sb_needed - set(sb_df.columns)
-if miss_sb:
-    st.error(f"Google Sheet tab '{TAB_SB}' is missing columns: {', '.join(sorted(miss_sb))}")
+if "Family Surname" not in sb_df.columns:
+    st.error(f"Google Sheet tab '{TAB_SB}' must include column 'Family Surname'.")
     st.stop()
 
-# Clean deadlines + dates
+
+def build_kid_age_pairs(header_raw: list[str], header_unique: list[str]) -> list[tuple[str, str | None]]:
+    pairs = []
+    for i, h in enumerate(header_raw):
+        hs = str(h).strip().lower()
+        if hs.startswith("kid #"):
+            kid_col = header_unique[i]
+            age_col = None
+            if i + 1 < len(header_raw) and str(header_raw[i + 1]).strip().lower() == "age":
+                age_col = header_unique[i + 1]
+            pairs.append((kid_col, age_col))
+    return pairs
+
+
+kid_age_pairs = build_kid_age_pairs(sb_header_raw, sb_header_unique)
+if not kid_age_pairs:
+    st.error(f"'{TAB_SB}' must include Kid columns like 'Kid #1' (and optional 'Age' next to each kid).")
+    st.stop()
+
+# Clean
 deadlines_df["month"] = deadlines_df["month"].astype(str).str.strip()
 deadlines_df["deadline_local"] = deadlines_df["deadline_local"].astype(str).str.strip()
 deadlines_df["timezone"] = deadlines_df["timezone"].astype(str).str.strip()
@@ -347,7 +318,6 @@ service_dates_all["date"] = service_dates_all["date"].astype(str).str.strip()
 service_dates_all["label"] = service_dates_all["label"].astype(str).str.strip()
 service_dates_all["is_service_day"] = service_dates_all["is_service_day"].astype(str).str.strip()
 
-# Base TZ
 BASE_TZ = "Africa/Johannesburg"
 try:
     tz0 = str(deadlines_df["timezone"].iloc[0]).strip()
@@ -359,27 +329,19 @@ except Exception:
 now_base = get_now_in_tz(BASE_TZ)
 target_month_key = get_target_month_key(now_base)
 
-# Filter month services
 month_dates = service_dates_all[
     (service_dates_all["target_month"] == target_month_key)
     & (service_dates_all["is_service_day"].map(_is_truthy_service_day))
 ].copy()
 
 if month_dates.empty:
-    st.markdown(
-        f"""
-        ## 🔒 This month’s availability form is not open yet.
-
-        No service dates were found for **{target_month_key}**.
-        """
-    )
+    st.markdown(f"## 🔒 This month’s availability form is not open yet.\n\nNo service dates for **{target_month_key}**.")
     st.stop()
 
 month_dates["_sort"] = month_dates["date"].map(_safe_parse_date_ymd)
 month_dates = month_dates.sort_values("_sort").drop(columns=["_sort"])
 
 date_labels = month_dates["label"].astype(str).tolist()
-
 morning_labels = [l for l in date_labels if "morning" in l.lower()]
 evening_labels = [l for l in date_labels if "evening" in l.lower()]
 
@@ -400,107 +362,93 @@ def get_deadline_for_target_month(deadlines: pd.DataFrame, month_key: str):
 
 
 deadline_dt, deadline_tz = get_deadline_for_target_month(deadlines_df, target_month_key)
+if deadline_dt is None:
+    st.error(f"No deadline found for month {target_month_key} in '{TAB_DEADLINES}'.")
+    st.stop()
 
-is_closed = True
-if deadline_dt is not None:
-    now_local = get_now_in_tz(deadline_tz)
-    is_closed = (deadline_dt - now_local).total_seconds() <= 0
-
-if is_closed:
+now_local = get_now_in_tz(deadline_tz)
+if (deadline_dt - now_local).total_seconds() <= 0:
     target_month_name = datetime.strptime(target_month_key, "%Y-%m").strftime("%B")
     st.markdown(f"## 🔒 {target_month_name} availability submissions are now closed.")
     st.stop()
 
-now_local = get_now_in_tz(deadline_tz)
 remaining_seconds = (deadline_dt - now_local).total_seconds()
-
 st.info(
     f"🗓️ Submitting availability for **{target_month_key}**.\n\n"
     f"⏳ Form closes at **{deadline_dt.strftime('%Y-%m-%d %H:%M')}** ({deadline_tz}). "
     f"Time remaining: **{format_minutes_remaining(remaining_seconds)}**\n\n"
     f"🔁 You can submit more than once — we will use your most recent submission."
 )
-
 if st.button("Refresh timer"):
     st.rerun()
 
 # ─────────────────────────────────────────────────────────────
-# Build family -> kids mapping
+# Family -> kids (slot-safe)
 # ─────────────────────────────────────────────────────────────
 sb = sb_df.copy()
 sb["Family Surname"] = sb["Family Surname"].astype(str).str.strip()
-
-kid_cols = [c for c in sb.columns if str(c).strip().lower().startswith("kid #")]
-kid_cols = sorted(
-    kid_cols,
-    key=lambda x: int("".join([ch for ch in x if ch.isdigit()]) or "999")
-)
-
 families = sorted({f for f in sb["Family Surname"].tolist() if f and f.lower() != "nan"})
 
 
-def get_kids_for_family(family: str) -> list[str]:
-    if not family:
-        return []
+def _clean_cell(x) -> str:
+    s = str(x).strip()
+    return "" if (s == "" or s.lower() == "nan") else s
+
+
+def get_kids_info_for_family(family: str) -> list[dict]:
     row = sb[sb["Family Surname"] == family]
     if row.empty:
         return []
     r0 = row.iloc[0]
-    kids = []
-    for c in kid_cols:
-        v = str(r0.get(c, "")).strip()
-        if v and v.lower() != "nan":
-            kids.append(v)
-    return kids
+    out = []
+    for slot_idx, (kid_col, age_col) in enumerate(kid_age_pairs, start=1):
+        kid_name = _clean_cell(r0.get(kid_col, ""))
+        if not kid_name:
+            continue
+        age_val = _clean_cell(r0.get(age_col, "")) if age_col else ""
+        out.append({"slot": slot_idx, "name": kid_name, "age": age_val})
+    return out
 
 
 # ─────────────────────────────────────────────────────────────
-# Session state
-# ─────────────────────────────────────────────────────────────
-if "answers" not in st.session_state:
-    st.session_state.answers = {}
-answers = st.session_state.answers
-
-# ─────────────────────────────────────────────────────────────
-# Form UI
+# UI
 # ─────────────────────────────────────────────────────────────
 st.subheader("Your details")
-answers["FAMILY_SURNAME"] = st.selectbox("Family surname", options=[""] + families, index=0)
-
-if not answers.get("FAMILY_SURNAME"):
+family = st.selectbox("Family surname", options=[""] + families, index=0)
+if not family:
     st.caption("Select your family surname to continue.")
     st.stop()
 
-kids = get_kids_for_family(answers.get("FAMILY_SURNAME", ""))
-
-if not kids:
-    st.warning("No kids found for this family in 'uKids Kids SB'. Please fill in Kid #1 (and Kid #2/#3 if applicable).")
+kids_info = get_kids_info_for_family(family)
+if not kids_info:
+    st.warning("No kids found for this family in 'uKids Kids SB'. Please fill in Kid #1 (and Age if you want).")
     st.stop()
 
 st.subheader(f"Availability for {target_month_key}")
 
-kids_selected_map: dict[str, set[str]] = {}
+kids_selected_map: dict[int, set[str]] = {}
 
-for idx, kid_name in enumerate(kids, start=1):
-    # ✅ Card wrapper start
-    st.markdown('<div class="kid-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="kid-title">{kid_name}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="kid-subtitle">Select all services this child is available for.</div>', unsafe_allow_html=True)
+for k in kids_info:
+    slot = k["slot"]
+    kid_name = k["name"]
+
+    st.markdown(f"## {kid_name}")
+    st.caption("Select all services this child is available for.")
 
     st.markdown("### Which morning services are you available?")
     m1, m2 = st.columns(2)
     with m1:
         if st.button(f"Select all mornings ({kid_name})"):
             for opt in morning_options:
-                st.session_state[f"k{idx}_morn_{target_month_key}_{opt}"] = True
+                st.session_state[f"slot{slot}_morn_{target_month_key}_{opt}"] = True
     with m2:
         if st.button(f"Clear mornings ({kid_name})"):
             for opt in morning_options:
-                st.session_state[f"k{idx}_morn_{target_month_key}_{opt}"] = False
+                st.session_state[f"slot{slot}_morn_{target_month_key}_{opt}"] = False
 
     chosen_m = []
     for opt in morning_options:
-        key = f"k{idx}_morn_{target_month_key}_{opt}"
+        key = f"slot{slot}_morn_{target_month_key}_{opt}"
         if st.checkbox(opt, key=key):
             chosen_m.append(opt)
 
@@ -511,29 +459,29 @@ for idx, kid_name in enumerate(kids, start=1):
     with e1:
         if st.button(f"Select all evenings ({kid_name})"):
             for opt in evening_options:
-                st.session_state[f"k{idx}_eve_{target_month_key}_{opt}"] = True
+                st.session_state[f"slot{slot}_eve_{target_month_key}_{opt}"] = True
     with e2:
         if st.button(f"Clear evenings ({kid_name})"):
             for opt in evening_options:
-                st.session_state[f"k{idx}_eve_{target_month_key}_{opt}"] = False
+                st.session_state[f"slot{slot}_eve_{target_month_key}_{opt}"] = False
 
     chosen_e = []
     for opt in evening_options:
-        key = f"k{idx}_eve_{target_month_key}_{opt}"
+        key = f"slot{slot}_eve_{target_month_key}_{opt}"
         if st.checkbox(opt, key=key):
             chosen_e.append(opt)
 
     selected_morning_labels = {morning_display_map[d] for d in chosen_m if d in morning_display_map}
     selected_evening_labels = {evening_display_map[d] for d in chosen_e if d in evening_display_map}
-    kids_selected_map[kid_name] = selected_morning_labels.union(selected_evening_labels)
+    kids_selected_map[slot] = selected_morning_labels.union(selected_evening_labels)
 
-    # ✅ Card wrapper end
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.divider()
 
 st.subheader("Review")
-st.write(f"**Family:** {answers.get('FAMILY_SURNAME')}")
-for kid_name in kids:
-    st.write(f"- **{kid_name}:** {len(kids_selected_map.get(kid_name, set()))} services selected")
+st.write(f"**Family:** {family}")
+for k in kids_info:
+    slot = k["slot"]
+    st.write(f"- **{k['name']}:** {len(kids_selected_map.get(slot, set()))} services selected")
 
 st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
 submitted = st.button("Submit")
@@ -545,18 +493,18 @@ if submitted:
         st.error("Form is closed.")
         st.stop()
 
-    family = answers.get("FAMILY_SURNAME") or ""
-    if not family:
-        st.error("Please select your family surname.")
-        st.stop()
-
     now_iso = datetime.utcnow().isoformat() + "Z"
 
-    desired_header = ["timestamp", "Availability month", "Family Surname", "Serving kid"] + date_labels
+    # ✅ EXACT ORDER like your screenshot
+    desired_header = ["timestamp", "Availability month", "Family Surname", "Serving kid", "Age"] + date_labels
 
     try:
-        for kid_name in kids:
-            selected = kids_selected_map.get(kid_name, set())
+        for k in kids_info:
+            slot = k["slot"]
+            kid_name = k["name"]
+            age_val = k.get("age", "")
+
+            selected = kids_selected_map.get(slot, set())
             yes_map = {lbl: ("Yes" if lbl in selected else "No") for lbl in date_labels}
 
             row_map = {
@@ -564,6 +512,7 @@ if submitted:
                 "Availability month": target_month_key,
                 "Family Surname": family,
                 "Serving kid": kid_name,
+                "Age": age_val,   # ✅ output only, not shown on form
             }
             row_map.update(yes_map)
 
