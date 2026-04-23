@@ -6,7 +6,7 @@
 # Only selected ("Yes") services are saved.
 #
 # INPUT FORMAT IN "uKids Kids SB":
-#   Family Surname | Kid #1 | Age | Kid #2 | Age | Kid #3 | Age ...
+#   Family Code | Name & Surname | Age
 #
 # DEADLINES FORMAT IN "Kids Deadlines":
 #   month | deadline_local | timezone | Opening date
@@ -14,10 +14,10 @@
 # FORM OPEN RULE:
 #   Opening date <= now < deadline_local
 #
-# NOTES:
-# - Age is NOT shown on the form
-# - Age IS saved in the output
-# - Reopening an old month works by changing "Opening date" and "deadline_local"
+# PARENT FLOW:
+# - Parent searches/selects one child name
+# - App finds that child's family code
+# - App automatically loads all children under that family code
 
 import time
 import random
@@ -67,9 +67,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────
-# Tabs
-# ─────────────────────────────────────────────────────────────
 TAB_RESPONSES = "uKids Kids responses"
 TAB_SB = "uKids Kids SB"
 TAB_DEADLINES = "Kids Deadlines"
@@ -198,10 +195,11 @@ def append_response_row(desired_header: list[str], row_map: dict):
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def fetch_sb_raw_unique_df():
+def fetch_sb_df() -> pd.DataFrame:
     sh = get_spreadsheet()
-    ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=50)
-    return ws_get_values_and_df(ws)
+    ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
+    _, _, df = ws_get_values_and_df(ws)
+    return df
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -221,7 +219,7 @@ def fetch_service_dates_df() -> pd.DataFrame:
 
 
 def clear_caches():
-    for fn in (fetch_sb_raw_unique_df, fetch_deadlines_df, fetch_service_dates_df):
+    for fn in (fetch_sb_df, fetch_deadlines_df, fetch_service_dates_df):
         try:
             fn.clear()
         except Exception:
@@ -292,33 +290,7 @@ def _clean_cell(x) -> str:
     return "" if (s == "" or s.lower() == "nan") else s
 
 
-def build_kid_age_pairs(header_raw: list[str], header_unique: list[str]) -> list[tuple[str, str | None]]:
-    """
-    Pairs each Kid column with the Age column immediately to its right if present.
-    Example:
-      Family Surname | Kid #1 | Age | Kid #2 | Age | Kid #3 | Age
-    """
-    pairs = []
-    for i, h in enumerate(header_raw):
-        hs = str(h).strip().lower()
-        if hs.startswith("kid #"):
-            kid_col = header_unique[i]
-            age_col = None
-            if i + 1 < len(header_raw) and str(header_raw[i + 1]).strip().lower() == "age":
-                age_col = header_unique[i + 1]
-            pairs.append((kid_col, age_col))
-    return pairs
-
-
 def get_currently_open_month(deadlines: pd.DataFrame, base_tz: str):
-    """
-    Returns:
-      (month_key, opening_dt, deadline_dt, tz_name)
-    for the row where opening_dt <= now < deadline_dt.
-
-    If multiple rows are open, returns the one with the earliest deadline.
-    If none are open, returns (None, None, None, base_tz).
-    """
     candidates = []
 
     for _, row in deadlines.iterrows():
@@ -343,7 +315,7 @@ def get_currently_open_month(deadlines: pd.DataFrame, base_tz: str):
     if not candidates:
         return None, None, None, base_tz
 
-    candidates.sort(key=lambda x: x[2])  # earliest deadline first
+    candidates.sort(key=lambda x: x[2])
     return candidates[0]
 
 
@@ -351,7 +323,7 @@ def get_currently_open_month(deadlines: pd.DataFrame, base_tz: str):
 # Load config
 # ─────────────────────────────────────────────────────────────
 try:
-    sb_header_raw, sb_header_unique, sb_df = fetch_sb_raw_unique_df()
+    sb_df = fetch_sb_df()
     deadlines_df = fetch_deadlines_df()
     service_dates_all = fetch_service_dates_df()
 except Exception as e:
@@ -361,20 +333,12 @@ except Exception as e:
 for needed, tab, df in [
     ({"month", "deadline_local", "timezone", "Opening date"}, TAB_DEADLINES, deadlines_df),
     ({"target_month", "date", "label", "is_service_day"}, TAB_DATES, service_dates_all),
+    ({"Family Code", "Name & Surname", "Age"}, TAB_SB, sb_df),
 ]:
     miss = needed - set(df.columns)
     if miss:
         st.error(f"Google Sheet tab '{tab}' is missing columns: {', '.join(sorted(miss))}")
         st.stop()
-
-if "Family Surname" not in sb_df.columns:
-    st.error(f"Google Sheet tab '{TAB_SB}' must include column 'Family Surname'.")
-    st.stop()
-
-kid_age_pairs = build_kid_age_pairs(sb_header_raw, sb_header_unique)
-if not kid_age_pairs:
-    st.error(f"'{TAB_SB}' must include Kid columns like 'Kid #1' with optional 'Age' next to each kid.")
-    st.stop()
 
 deadlines_df["month"] = deadlines_df["month"].astype(str).str.strip()
 deadlines_df["deadline_local"] = deadlines_df["deadline_local"].astype(str).str.strip()
@@ -385,6 +349,10 @@ service_dates_all["target_month"] = service_dates_all["target_month"].astype(str
 service_dates_all["date"] = service_dates_all["date"].astype(str).str.strip()
 service_dates_all["label"] = service_dates_all["label"].astype(str).str.strip()
 service_dates_all["is_service_day"] = service_dates_all["is_service_day"].astype(str).str.strip()
+
+sb_df["Family Code"] = sb_df["Family Code"].astype(str).str.strip()
+sb_df["Name & Surname"] = sb_df["Name & Surname"].astype(str).str.strip()
+sb_df["Age"] = sb_df["Age"].astype(str).str.strip()
 
 BASE_TZ = "Africa/Johannesburg"
 try:
@@ -443,29 +411,41 @@ if st.button("Refresh timer"):
 
 
 # ─────────────────────────────────────────────────────────────
-# Family -> kids info
+# Child search -> family lookup
 # ─────────────────────────────────────────────────────────────
-sb = sb_df.copy()
-sb["Family Surname"] = sb["Family Surname"].astype(str).str.strip()
-families = sorted({f for f in sb["Family Surname"].tolist() if f and f.lower() != "nan"})
+child_names = sorted(
+    {
+        name for name in sb_df["Name & Surname"].tolist()
+        if name and str(name).strip().lower() != "nan"
+    }
+)
 
 
-def get_kids_info_for_family(family: str) -> list[dict]:
-    row = sb[sb["Family Surname"] == family]
-    if row.empty:
+def get_family_code_for_child(child_name: str) -> str:
+    rows = sb_df[sb_df["Name & Surname"] == child_name]
+    if rows.empty:
+        return ""
+    return _clean_cell(rows.iloc[0].get("Family Code", ""))
+
+
+def get_kids_info_for_family_code(family_code: str) -> list[dict]:
+    rows = sb_df[sb_df["Family Code"] == family_code].copy()
+    if rows.empty:
         return []
-    r0 = row.iloc[0]
+
     out = []
-    for slot_idx, (kid_col, age_col) in enumerate(kid_age_pairs, start=1):
-        kid_name = _clean_cell(r0.get(kid_col, ""))
+    for idx, row in rows.reset_index(drop=True).iterrows():
+        kid_name = _clean_cell(row.get("Name & Surname", ""))
+        age_val = _clean_cell(row.get("Age", ""))
         if not kid_name:
             continue
-        age_val = _clean_cell(r0.get(age_col, "")) if age_col else ""
-        out.append({
-            "slot": slot_idx,
-            "name": kid_name,
-            "age": age_val,
-        })
+        out.append(
+            {
+                "slot": idx + 1,
+                "name": kid_name,
+                "age": age_val,
+            }
+        )
     return out
 
 
@@ -473,15 +453,20 @@ def get_kids_info_for_family(family: str) -> list[dict]:
 # Form UI
 # ─────────────────────────────────────────────────────────────
 st.subheader("Your details")
-family = st.selectbox("Family surname", options=[""] + families, index=0)
+selected_child = st.selectbox("Select one child from your family", options=[""] + child_names, index=0)
 
-if not family:
-    st.caption("Select your family surname to continue.")
+if not selected_child:
+    st.caption("Search for and select one child to continue.")
     st.stop()
 
-kids_info = get_kids_info_for_family(family)
+family_code = get_family_code_for_child(selected_child)
+if not family_code:
+    st.error("Could not find a family code for the selected child.")
+    st.stop()
+
+kids_info = get_kids_info_for_family_code(family_code)
 if not kids_info:
-    st.warning("No kids found for this family in 'uKids Kids SB'.")
+    st.warning("No children found for this family in 'uKids Kids SB'.")
     st.stop()
 
 st.subheader(f"Availability for {target_month_key}")
@@ -538,7 +523,7 @@ for k in kids_info:
     st.divider()
 
 st.subheader("Review")
-st.write(f"**Family:** {family}")
+st.write(f"**Selected child:** {selected_child}")
 for k in kids_info:
     st.write(f"- **{k['name']}:** {len(kids_selected_map.get(k['slot'], set()))} services selected")
 
@@ -553,8 +538,6 @@ if submitted:
         st.stop()
 
     now_iso = datetime.utcnow().isoformat() + "Z"
-
-    # Exact output structure requested
     desired_header = ["timestamp", "Service", "Name", "Age"]
 
     rows_to_write = []
