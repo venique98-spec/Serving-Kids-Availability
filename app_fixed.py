@@ -1,23 +1,29 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# OUTPUT FORMAT:
-#   timestamp | Service | Name | Age
-# Only selected ("Yes") services are saved.
+# PARENT FLOW
+# - Parent searches/selects one child
+# - App finds that child’s Family Code
+# - App automatically loads all children under that Family Code
+# - Parent selects availability for each child
 #
-# INPUT FORMAT IN "uKids Kids SB":
+# RAW OUTPUT TAB: "uKids Kids responses"
+# One row per child:
+#   timestamp | Availability month | Family Code | Name | Age | <service columns as Yes/No>
+#
+# FILTERED OUTPUT TAB: "Final Kids serving dates"
+# Rebuilt from raw data via Admin button:
+#   timestamp | Service | Name | Age
+# Only "Yes" services are listed there.
+#
+# INPUT TAB: "uKids Kids SB"
 #   Family Code | Name & Surname | Age
 #
-# DEADLINES FORMAT IN "Kids Deadlines":
+# DEADLINES TAB: "Kids Deadlines"
 #   month | deadline_local | timezone | Opening date
 #
-# FORM OPEN RULE:
-#   Opening date <= now < deadline_local
-#
-# PARENT FLOW:
-# - Parent searches/selects one child name
-# - App finds that child's family code
-# - App automatically loads all children under that family code
+# SERVICE DATES TAB: "Kids & Guys ServiceDates"
+#   target_month | date | label | is_service_day
 
 import time
 import random
@@ -71,6 +77,7 @@ TAB_RESPONSES = "uKids Kids responses"
 TAB_SB = "uKids Kids SB"
 TAB_DEADLINES = "Kids Deadlines"
 TAB_DATES = "Kids & Guys ServiceDates"
+TAB_FINAL = "Final Kids serving dates"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -96,6 +103,14 @@ def _get_secret_any(*paths):
     return None
 
 
+def get_admin_key() -> str:
+    v = _get_secret_any(["ADMIN_KEY"], ["general", "ADMIN_KEY"])
+    return str(v) if v else ""
+
+
+ADMIN_KEY = get_admin_key()
+
+
 def is_sheets_enabled() -> bool:
     if gspread is None:
         return False
@@ -119,7 +134,7 @@ def gs_retry(func, *args, **kwargs):
         except APIError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status in (429, 500, 502, 503):
-                time.sleep(min(10, (2**attempt) + random.random()))
+                time.sleep(min(10, (2 ** attempt) + random.random()))
                 continue
             raise
 
@@ -186,15 +201,16 @@ def ws_ensure_header(ws, desired_header: list[str]) -> list[str]:
     return header
 
 
-def append_response_row(desired_header: list[str], row_map: dict):
+def append_multiple_rows(sheet_title: str, desired_header: list[str], row_maps: list[dict]):
     sh = get_spreadsheet()
-    ws = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=max(50, len(desired_header) + 10))
+    ws = ensure_worksheet(sh, sheet_title, rows=12000, cols=max(100, len(desired_header) + 10))
     header = ws_ensure_header(ws, desired_header)
-    row = [row_map.get(col, "") for col in header]
-    gs_retry(ws.append_row, row)
+    values = [[row.get(col, "") for col in header] for row in row_maps]
+    if values:
+        gs_retry(ws.append_rows, values)
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_sb_df() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
@@ -202,7 +218,7 @@ def fetch_sb_df() -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_deadlines_df() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_DEADLINES, rows=500, cols=10)
@@ -210,7 +226,7 @@ def fetch_deadlines_df() -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_service_dates_df() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_DATES, rows=4000, cols=20)
@@ -218,16 +234,12 @@ def fetch_service_dates_df() -> pd.DataFrame:
     return df
 
 
-def clear_caches():
-    for fn in (fetch_sb_df, fetch_deadlines_df, fetch_service_dates_df):
-        try:
-            fn.clear()
-        except Exception:
-            pass
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_responses_df() -> pd.DataFrame:
+    sh = get_spreadsheet()
+    ws = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=300)
+    _, _, df = ws_get_values_and_df(ws)
+    return df
 
 
 # ─────────────────────────────────────────────────────────────
@@ -317,6 +329,39 @@ def get_currently_open_month(deadlines: pd.DataFrame, base_tz: str):
 
     candidates.sort(key=lambda x: x[2])
     return candidates[0]
+
+
+def rebuild_final_schedule():
+    sh = get_spreadsheet()
+    ws_raw = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=300)
+    ws_final = ensure_worksheet(sh, TAB_FINAL, rows=12000, cols=20)
+
+    _, _, df = ws_get_values_and_df(ws_raw)
+
+    if df.empty:
+        ws_final.clear()
+        gs_retry(ws_final.update, "A1", [["timestamp", "Service", "Name", "Age"]])
+        return 0
+
+    base_cols = ["timestamp", "Availability month", "Family Code", "Name", "Age"]
+    service_cols = [c for c in df.columns if c not in base_cols]
+
+    rows_out = []
+    for _, row in df.iterrows():
+        timestamp = row.get("timestamp", "")
+        name = row.get("Name", "")
+        age = row.get("Age", "")
+
+        for service in service_cols:
+            if str(row.get(service, "")).strip().lower() == "yes":
+                rows_out.append([timestamp, service, name, age])
+
+    ws_final.clear()
+    gs_retry(ws_final.update, "A1", [["timestamp", "Service", "Name", "Age"]])
+    if rows_out:
+        gs_retry(ws_final.append_rows, rows_out)
+
+    return len(rows_out)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -538,38 +583,61 @@ if submitted:
         st.stop()
 
     now_iso = datetime.utcnow().isoformat() + "Z"
-    desired_header = ["timestamp", "Service", "Name", "Age"]
+    desired_header = ["timestamp", "Availability month", "Family Code", "Name", "Age"] + date_labels
 
     rows_to_write = []
     for k in kids_info:
         slot = k["slot"]
         kid_name = k["name"]
         age_val = k["age"]
-        selected_services = sorted(
-            list(kids_selected_map.get(slot, set())),
-            key=lambda x: date_labels.index(x) if x in date_labels else 9999,
-        )
+        selected_services = kids_selected_map.get(slot, set())
 
-        for service_label in selected_services:
-            rows_to_write.append(
-                {
-                    "timestamp": now_iso,
-                    "Service": service_label,
-                    "Name": kid_name,
-                    "Age": age_val,
-                }
-            )
+        row_map = {
+            "timestamp": now_iso,
+            "Availability month": target_month_key,
+            "Family Code": family_code,
+            "Name": kid_name,
+            "Age": age_val,
+        }
 
-    if not rows_to_write:
-        st.error("Please select at least one service before submitting.")
-        st.stop()
+        for service_label in date_labels:
+            row_map[service_label] = "Yes" if service_label in selected_services else "No"
+
+        rows_to_write.append(row_map)
 
     try:
-        for row_map in rows_to_write:
-            append_response_row(desired_header, row_map)
-
-        clear_caches()
+        append_multiple_rows(TAB_RESPONSES, desired_header, rows_to_write)
         st.success(f"Submission saved to Google Sheets. Rows added: {len(rows_to_write)}")
-
     except Exception as e:
         st.error(f"Failed to save submission: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# Admin tools
+# ─────────────────────────────────────────────────────────────
+with st.expander("Admin"):
+    if not ADMIN_KEY:
+        st.info("Admin key is not set. Admin tools are currently open to anyone with the link.")
+        unlocked = True
+    else:
+        key = st.text_input("Enter admin key", type="password")
+        unlocked = key == ADMIN_KEY
+        if key and not unlocked:
+            st.error("Incorrect admin key.")
+        elif unlocked:
+            st.success("Admin unlocked.")
+
+    if unlocked:
+        if st.button("Rebuild Final Kids Schedule"):
+            try:
+                count = rebuild_final_schedule()
+                st.success(f"Final Kids serving dates rebuilt. Rows written: {count}")
+            except Exception as e:
+                st.error(f"Failed to rebuild final schedule: {e}")
+
+        if st.button("Preview raw submissions count"):
+            try:
+                responses_df = fetch_responses_df()
+                st.write(f"Raw submission rows: **{len(responses_df)}**")
+            except Exception as e:
+                st.error(f"Could not load raw submissions: {e}")
