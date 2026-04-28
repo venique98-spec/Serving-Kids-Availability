@@ -1,29 +1,13 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# PARENT FLOW
-# - Parent searches/selects one child
-# - App finds that child’s Family Code
-# - App automatically loads all children under that Family Code
-# - Parent selects availability for each child
-#
 # RAW OUTPUT TAB: "uKids Kids responses"
 # One row per child:
-#   timestamp | Availability month | Family Code | Name | Age | <service columns as Yes/No>
+# timestamp | Availability month | Family Code | Name | Age | service columns as Yes/No
 #
-# FILTERED OUTPUT TAB: "Final Kids serving dates"
-# Rebuilt from raw data via Admin button:
-#   timestamp | Service | Name | Age
-# Only "Yes" services are listed there.
-#
-# INPUT TAB: "uKids Kids SB"
-#   Family Code | Name & Surname | Age
-#
-# DEADLINES TAB: "Kids Deadlines"
-#   month | deadline_local | timezone | Opening date
-#
-# SERVICE DATES TAB: "Kids & Guys ServiceDates"
-#   target_month | date | label | is_service_day
+# FINAL OUTPUT TAB: "Final Kids serving dates"
+# Built from raw responses via Admin button:
+# timestamp | Service | Name | Age
 
 import time
 import random
@@ -338,15 +322,18 @@ def rebuild_final_schedule():
 
     _, _, df = ws_get_values_and_df(ws_raw)
 
+    header_final = ["timestamp", "Service", "Name", "Age"]
+
     if df.empty:
         ws_final.clear()
-        gs_retry(ws_final.update, "A1", [["timestamp", "Service", "Name", "Age"]])
+        gs_retry(ws_final.update, "A1", [header_final])
         return 0
 
     base_cols = ["timestamp", "Availability month", "Family Code", "Name", "Age"]
     service_cols = [c for c in df.columns if c not in base_cols]
 
     rows_out = []
+
     for _, row in df.iterrows():
         timestamp = row.get("timestamp", "")
         name = row.get("Name", "")
@@ -357,11 +344,45 @@ def rebuild_final_schedule():
                 rows_out.append([timestamp, service, name, age])
 
     ws_final.clear()
-    gs_retry(ws_final.update, "A1", [["timestamp", "Service", "Name", "Age"]])
+    gs_retry(ws_final.update, "A1", [header_final])
     if rows_out:
         gs_retry(ws_final.append_rows, rows_out)
 
     return len(rows_out)
+
+
+def show_admin_panel():
+    with st.expander("Admin"):
+        if not ADMIN_KEY:
+            st.info("Admin key is not set. Admin tools are currently open to anyone with the link.")
+            unlocked = True
+        else:
+            key = st.text_input("Enter admin key", type="password")
+            unlocked = key == ADMIN_KEY
+
+            if key and not unlocked:
+                st.error("Incorrect admin key.")
+            elif unlocked:
+                st.success("Admin unlocked.")
+
+        if unlocked:
+            if st.button("Rebuild Final Kids Schedule"):
+                try:
+                    count = rebuild_final_schedule()
+                    try:
+                        fetch_responses_df.clear()
+                    except Exception:
+                        pass
+                    st.success(f"Final Kids serving dates rebuilt. Rows written: {count}")
+                except Exception as e:
+                    st.error(f"Failed to rebuild final schedule: {e}")
+
+            if st.button("Preview raw submissions count"):
+                try:
+                    responses_df = fetch_responses_df()
+                    st.write(f"Raw submission rows: **{len(responses_df)}**")
+                except Exception as e:
+                    st.error(f"Could not load raw submissions: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -373,7 +394,9 @@ try:
     service_dates_all = fetch_service_dates_df()
 except Exception as e:
     st.error(f"Failed to load config from Google Sheets: {e}")
+    show_admin_panel()
     st.stop()
+
 
 for needed, tab, df in [
     ({"month", "deadline_local", "timezone", "Opening date"}, TAB_DEADLINES, deadlines_df),
@@ -383,7 +406,9 @@ for needed, tab, df in [
     miss = needed - set(df.columns)
     if miss:
         st.error(f"Google Sheet tab '{tab}' is missing columns: {', '.join(sorted(miss))}")
+        show_admin_panel()
         st.stop()
+
 
 deadlines_df["month"] = deadlines_df["month"].astype(str).str.strip()
 deadlines_df["deadline_local"] = deadlines_df["deadline_local"].astype(str).str.strip()
@@ -407,11 +432,17 @@ try:
 except Exception:
     pass
 
+
 target_month_key, opening_dt, deadline_dt, deadline_tz = get_currently_open_month(deadlines_df, BASE_TZ)
 
+# ✅ IMPORTANT FIX:
+# If no form is open, parents see closed message,
+# but Admin still appears so you can rebuild final data.
 if not target_month_key:
     st.markdown("## 🔒 No availability form is currently open.")
+    show_admin_panel()
     st.stop()
+
 
 month_dates = service_dates_all[
     (service_dates_all["target_month"] == target_month_key)
@@ -426,7 +457,9 @@ if month_dates.empty:
         No service dates were found for **{target_month_key}**.
         """
     )
+    show_admin_panel()
     st.stop()
+
 
 month_dates["_sort"] = month_dates["date"].map(_safe_parse_date_ymd)
 month_dates = month_dates.sort_values("_sort").drop(columns=["_sort"])
@@ -502,16 +535,19 @@ selected_child = st.selectbox("Select one child from your family", options=[""] 
 
 if not selected_child:
     st.caption("Search for and select one child to continue.")
+    show_admin_panel()
     st.stop()
 
 family_code = get_family_code_for_child(selected_child)
 if not family_code:
     st.error("Could not find a family code for the selected child.")
+    show_admin_panel()
     st.stop()
 
 kids_info = get_kids_info_for_family_code(family_code)
 if not kids_info:
     st.warning("No children found for this family in 'uKids Kids SB'.")
+    show_admin_panel()
     st.stop()
 
 st.subheader(f"Availability for {target_month_key}")
@@ -567,6 +603,7 @@ for k in kids_info:
 
     st.divider()
 
+
 st.subheader("Review")
 st.write(f"**Selected child:** {selected_child}")
 for k in kids_info:
@@ -612,32 +649,5 @@ if submitted:
         st.error(f"Failed to save submission: {e}")
 
 
-# ─────────────────────────────────────────────────────────────
-# Admin tools
-# ─────────────────────────────────────────────────────────────
-with st.expander("Admin"):
-    if not ADMIN_KEY:
-        st.info("Admin key is not set. Admin tools are currently open to anyone with the link.")
-        unlocked = True
-    else:
-        key = st.text_input("Enter admin key", type="password")
-        unlocked = key == ADMIN_KEY
-        if key and not unlocked:
-            st.error("Incorrect admin key.")
-        elif unlocked:
-            st.success("Admin unlocked.")
-
-    if unlocked:
-        if st.button("Rebuild Final Kids Schedule"):
-            try:
-                count = rebuild_final_schedule()
-                st.success(f"Final Kids serving dates rebuilt. Rows written: {count}")
-            except Exception as e:
-                st.error(f"Failed to rebuild final schedule: {e}")
-
-        if st.button("Preview raw submissions count"):
-            try:
-                responses_df = fetch_responses_df()
-                st.write(f"Raw submission rows: **{len(responses_df)}**")
-            except Exception as e:
-                st.error(f"Could not load raw submissions: {e}")
+# ✅ Admin also appears at bottom while form is open
+show_admin_panel()
