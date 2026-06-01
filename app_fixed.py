@@ -1,16 +1,28 @@
 # app_fixed.py
 # Weekly uKids Kids Availability Form
 #
-# Parent selects/searches one child.
-# App loads all siblings with the same Family Code.
+# Parent flow:
+# - Parent searches/selects one child
+# - App finds that child’s Family Code
+# - App automatically loads all siblings under that Family Code
+# - Parent selects available services for each child in ONE checkbox list
 #
-# RAW OUTPUT:
-# uKids Kids responses
+# RAW OUTPUT TAB: "uKids Kids responses"
+# One row per child:
 # timestamp | Service date | Family Code | Name | Age | service columns as Yes/No
 #
-# FINAL OUTPUT:
-# Final Kids serving dates
+# FINAL OUTPUT TAB: "Final Kids serving dates"
+# Built from raw responses via Admin button:
 # timestamp | Service date | Service | Name | Age
+#
+# REQUIRED TAB: "uKids Kids SB"
+# Family Code | Name & Surname | Age
+#
+# REQUIRED TAB: "Kids Deadlines"
+# collection_key | service_date | Opening date | deadline_local | timezone
+#
+# REQUIRED TAB: "Kids & Guys ServiceDates"
+# service_date | date | label | is_service_day
 
 import time
 import random
@@ -37,6 +49,9 @@ except Exception:
         pass
 
 
+# ─────────────────────────────────────────────────────────────
+# UI
+# ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="uKids Kids Availability Form", page_icon="🗓️", layout="centered")
 st.title("🗓️ uKids Kids Availability Form")
 
@@ -46,6 +61,7 @@ st.markdown(
   .stButton > button { width: 100%; height: 48px; font-size: 16px; }
   @media (max-width: 520px){
     div[data-testid="column"] { width: 100% !important; flex: 0 0 100% !important; }
+    pre, code { font-size: 15px; line-height: 1.35; }
   }
   .sticky-submit {
     position: sticky; bottom: 0; z-index: 999;
@@ -63,6 +79,9 @@ TAB_DATES = "Kids & Guys ServiceDates"
 TAB_FINAL = "Final Kids serving dates"
 
 
+# ─────────────────────────────────────────────────────────────
+# Secrets
+# ─────────────────────────────────────────────────────────────
 def _get_secret_any(*paths):
     try:
         cur = st.secrets
@@ -104,6 +123,9 @@ if not is_sheets_enabled():
     st.stop()
 
 
+# ─────────────────────────────────────────────────────────────
+# Google Sheets helpers
+# ─────────────────────────────────────────────────────────────
 def gs_retry(func, *args, **kwargs):
     for attempt in range(5):
         try:
@@ -120,6 +142,9 @@ def gs_retry(func, *args, **kwargs):
 def get_spreadsheet():
     sa = _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
     sheet_id = _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
+
+    if not sa or not sheet_id:
+        raise RuntimeError("Missing GSHEET_ID or gcp_service_account in secrets.")
 
     sa = dict(sa)
     pk = sa.get("private_key", "")
@@ -215,6 +240,9 @@ def fetch_responses_df():
     return df
 
 
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
 def get_now_in_tz(tz_name: str) -> datetime:
     if ZoneInfo is None:
         return datetime.utcnow()
@@ -244,27 +272,6 @@ def _safe_parse_date_ymd(s: str) -> datetime:
 
 def _is_truthy(v) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "y", "t")
-
-
-def _display_date_only(label: str) -> str:
-    s = str(label).strip()
-    s = s.replace("Morning Service", "").replace("Evening Service", "")
-    s = s.replace("Morning", "").replace("Evening", "").replace("Service", "")
-    return " ".join(s.split()).strip(" -")
-
-
-def _build_display_map(labels: list[str]) -> dict:
-    display_map, used = {}, set()
-    for lbl in labels:
-        base = _display_date_only(lbl)
-        disp = base
-        i = 2
-        while disp in used:
-            disp = f"{base} ({i})"
-            i += 1
-        used.add(disp)
-        display_map[disp] = lbl
-    return display_map
 
 
 def _clean_cell(x) -> str:
@@ -372,7 +379,9 @@ def show_admin_panel():
                     st.error(f"Could not load raw submissions: {e}")
 
 
+# ─────────────────────────────────────────────────────────────
 # Load config
+# ─────────────────────────────────────────────────────────────
 try:
     sb_df = fetch_sb_df()
     deadlines_df = fetch_deadlines_df()
@@ -446,15 +455,6 @@ week_dates = week_dates.sort_values("_sort").drop(columns=["_sort"])
 
 date_labels = week_dates["label"].astype(str).tolist()
 
-morning_labels = [l for l in date_labels if "morning" in l.lower()]
-evening_labels = [l for l in date_labels if "evening" in l.lower()]
-
-morning_display_map = _build_display_map(morning_labels)
-evening_display_map = _build_display_map(evening_labels)
-
-morning_options = list(morning_display_map.keys())
-evening_options = list(evening_display_map.keys())
-
 now_local = get_now_in_tz(deadline_tz)
 remaining_seconds = (deadline_dt - now_local).total_seconds()
 
@@ -470,6 +470,9 @@ if st.button("Refresh timer"):
     st.rerun()
 
 
+# ─────────────────────────────────────────────────────────────
+# Child search → family lookup
+# ─────────────────────────────────────────────────────────────
 child_names = sorted(
     {
         name for name in sb_df["Name & Surname"].tolist()
@@ -500,6 +503,9 @@ def get_kids_info_for_family_code(family_code: str) -> list[dict]:
     return out
 
 
+# ─────────────────────────────────────────────────────────────
+# Form UI
+# ─────────────────────────────────────────────────────────────
 st.subheader("Your details")
 selected_child = st.selectbox("Select one child from your family", options=[""] + child_names, index=0)
 
@@ -531,52 +537,15 @@ for k in kids_info:
     kid_name = k["name"]
 
     st.markdown(f"## {kid_name}")
-    st.caption("Select all services this child is available for.")
+    st.caption("Which services is this child available for?")
 
-    if morning_options:
-        st.markdown("### Which morning services are you available?")
-        m1, m2 = st.columns(2)
-        with m1:
-            if st.button(f"Select all mornings ({kid_name})"):
-                for opt in morning_options:
-                    st.session_state[f"slot{slot}_morn_{service_date_key}_{opt}"] = True
-        with m2:
-            if st.button(f"Clear mornings ({kid_name})"):
-                for opt in morning_options:
-                    st.session_state[f"slot{slot}_morn_{service_date_key}_{opt}"] = False
+    selected_labels = []
+    for service_label in date_labels:
+        key = f"slot{slot}_svc_{service_date_key}_{service_label}"
+        if st.checkbox(service_label, key=key):
+            selected_labels.append(service_label)
 
-        chosen_m = []
-        for opt in morning_options:
-            key = f"slot{slot}_morn_{service_date_key}_{opt}"
-            if st.checkbox(opt, key=key):
-                chosen_m.append(opt)
-    else:
-        chosen_m = []
-
-    if evening_options:
-        st.divider()
-        st.markdown("### Which evening services are you available?")
-        e1, e2 = st.columns(2)
-        with e1:
-            if st.button(f"Select all evenings ({kid_name})"):
-                for opt in evening_options:
-                    st.session_state[f"slot{slot}_eve_{service_date_key}_{opt}"] = True
-        with e2:
-            if st.button(f"Clear evenings ({kid_name})"):
-                for opt in evening_options:
-                    st.session_state[f"slot{slot}_eve_{service_date_key}_{opt}"] = False
-
-        chosen_e = []
-        for opt in evening_options:
-            key = f"slot{slot}_eve_{service_date_key}_{opt}"
-            if st.checkbox(opt, key=key):
-                chosen_e.append(opt)
-    else:
-        chosen_e = []
-
-    selected_morning_labels = {morning_display_map[d] for d in chosen_m if d in morning_display_map}
-    selected_evening_labels = {evening_display_map[d] for d in chosen_e if d in evening_display_map}
-    kids_selected_map[slot] = selected_morning_labels.union(selected_evening_labels)
+    kids_selected_map[slot] = set(selected_labels)
 
     st.divider()
 
