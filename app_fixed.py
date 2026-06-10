@@ -1,38 +1,24 @@
 # app_fixed.py
 # Weekly uKids Kids Availability Form
 #
-# NEW: Self-Registration Flow
-# - Parent can register a new child directly in the app (no separate Google Form needed)
-# - New child is linked to a family by picking an existing sibling from a dropdown
-#   OR registered as a brand-new family (auto-assigned next Family Code)
-# - Duplicate check: if exact Name & Surname already exists in uKids Kids SB,
-#   a message is shown asking the parent to contact Ps Somé
-# - Age stored as plain number (e.g. 11) in the sheet;
-#   displayed as "Age 11 (Born 2015)" in the UI
+# Registration flow:
+# - Family registers all their children at once (up to 5 kids per submission)
+# - Family is either brand-new (auto Family Code) or linked via an existing sibling
+# - Duplicate check per child name; duplicates blocked with a "contact Ps Some" message
+# - Age stored as plain number; displayed as "Age 11 (Born 2015)" in the UI
 #
-# Parent flow:
-# - Parent searches/selects one child
-# - App finds that child's Family Code
-# - App automatically loads all siblings under that Family Code
-# - Parent selects available services for each child in ONE checkbox list
+# Availability flow:
+# - Parent selects one child -> app loads all siblings via Family Code
+# - Parent selects available services per child and submits
 #
-# RAW OUTPUT TAB: "uKids Kids responses"
-# One row per child:
-# timestamp | Service date | Family Code | Name | Age | service columns as Yes/No
-#
-# FINAL OUTPUT TAB: "Final Kids serving dates"
-# Built from raw responses via Admin button:
-# timestamp | Service date | Service | Name | Age
-#
-# REQUIRED TAB: "uKids Kids SB"
-# Family Code | Name & Surname | Age
-#
-# REQUIRED TAB: "Kids Deadlines"
-# collection_key | service_date | Opening date | deadline_local | timezone
-#
-# REQUIRED TAB: "Kids & Guys ServiceDates"
-# service_date | date | label | is_service_day
+# SHEET TABS REQUIRED:
+# "uKids Kids SB"          : Family Code | Name & Surname | Age
+# "Kids Deadlines"         : service_date | Opening date | deadline_local | timezone
+# "Kids & Guys ServiceDates": service_date | date | label | is_service_day
+# "uKids Kids responses"   : timestamp | Service date | Family Code | Name | Age | <service cols>
+# "Final Kids serving dates": timestamp | Service date | Service | Name | Age
 
+import re
 import time
 import random
 from datetime import datetime
@@ -59,34 +45,29 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────
-# UI
+# Page config & CSS
 # ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="uKids Availability", page_icon="🗓️", layout="centered")
+st.set_page_config(page_title="uKids Availability", layout="centered")
 
 st.markdown(
     """
 <style>
-  /* ── Typography & base ── */
   @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
   html, body, [class*="css"] { font-family: 'Nunito', sans-serif; }
 
-  /* ── Brand colours ── */
   :root {
-    --green:   #2D6A4F;
-    --green-lt:#52B788;
-    --green-bg:#D8F3DC;
-    --amber:   #F4A261;
-    --red:     #E63946;
-    --text:    #1B1B1B;
-    --muted:   #6B7280;
-    --card:    #FFFFFF;
-    --bg:      #F0FAF4;
+    --green:    #2D6A4F;
+    --green-lt: #52B788;
+    --green-bg: #D8F3DC;
+    --amber:    #F4A261;
+    --text:     #1B1B1B;
+    --muted:    #6B7280;
+    --card:     #FFFFFF;
+    --bg:       #F0FAF4;
   }
 
-  /* ── Page background ── */
   .stApp { background: var(--bg); }
 
-  /* ── Hero banner ── */
   .ukids-hero {
     background: linear-gradient(135deg, var(--green) 0%, var(--green-lt) 100%);
     border-radius: 16px;
@@ -97,7 +78,6 @@ st.markdown(
   .ukids-hero h1 { font-size: 1.9rem; font-weight: 800; margin: 0 0 4px; color: #fff; }
   .ukids-hero p  { font-size: 0.95rem; margin: 0; opacity: 0.88; }
 
-  /* ── Section cards ── */
   .ukids-card {
     background: var(--card);
     border-radius: 12px;
@@ -109,21 +89,16 @@ st.markdown(
   .ukids-card-amber { border-left-color: var(--amber); }
   .ukids-card h3 { font-size: 1.05rem; font-weight: 700; color: var(--green); margin: 0 0 10px; }
 
-  /* ── Kid block ── */
-  .kid-header {
-    display: flex; align-items: center; gap: 10px;
-    margin: 6px 0 8px;
-  }
-  .kid-avatar {
-    width: 38px; height: 38px; border-radius: 50%;
-    background: var(--green-bg);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.2rem; flex-shrink: 0;
-  }
-  .kid-name  { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-  .kid-age   { font-size: 0.82rem; color: var(--muted); }
+  .kid-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+  .kid-age  { font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; }
 
-  /* ── Sticky submit ── */
+  .info-pill {
+    background: var(--green-bg);
+    border-radius: 8px; padding: 12px 16px;
+    font-size: 0.88rem; color: var(--green);
+    margin-bottom: 14px; line-height: 1.7;
+  }
+
   .sticky-submit {
     position: sticky; bottom: 0; z-index: 999;
     background: var(--bg);
@@ -131,7 +106,6 @@ st.markdown(
     border-top: 1px solid #d1fae5;
   }
 
-  /* ── Buttons ── */
   .stButton > button {
     width: 100%; height: 48px; font-size: 1rem;
     font-weight: 700; border-radius: 10px;
@@ -141,23 +115,20 @@ st.markdown(
   }
   .stButton > button:hover { background: var(--green-lt) !important; }
 
-  /* ── Registration toggle ── */
-  .reg-toggle {
-    text-align: center; padding: 12px 0 4px;
-    font-size: 0.9rem; color: var(--muted);
+  .child-block {
+    background: #f8fdfb;
+    border: 1px solid #d1fae5;
+    border-radius: 10px;
+    padding: 16px 16px 10px;
+    margin-bottom: 14px;
   }
-  .reg-toggle a { color: var(--green); font-weight: 700; text-decoration: none; }
-
-  /* ── Info pill ── */
-  .info-pill {
-    background: var(--green-bg);
-    border-radius: 8px; padding: 12px 16px;
-    font-size: 0.88rem; color: var(--green);
-    margin-bottom: 14px; line-height: 1.6;
+  .child-block-label {
+    font-size: 0.78rem; font-weight: 700;
+    color: var(--green); text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 8px;
   }
 
-  /* ── Mobile ── */
-  @media (max-width: 520px){
+  @media (max-width: 520px) {
     div[data-testid="column"] { width: 100% !important; flex: 0 0 100% !important; }
     .ukids-hero h1 { font-size: 1.5rem; }
   }
@@ -166,11 +137,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Hero banner
 st.markdown(
     """
 <div class="ukids-hero">
-  <h1>🗓️ uKids Availability</h1>
+  <h1>uKids Availability</h1>
   <p>Let us know which services your children can serve at this week.</p>
 </div>
 """,
@@ -183,6 +153,8 @@ TAB_DEADLINES = "Kids Deadlines"
 TAB_DATES     = "Kids & Guys ServiceDates"
 TAB_FINAL     = "Final Kids serving dates"
 
+MAX_CHILDREN_PER_REGISTRATION = 5
+
 
 # ─────────────────────────────────────────────────────────────
 # Secrets
@@ -193,8 +165,7 @@ def _get_secret_any(*paths):
     except Exception:
         return None
     for path in paths:
-        c = cur
-        ok = True
+        c, ok = cur, True
         for k in path:
             if k in c:
                 c = c[k]
@@ -206,20 +177,16 @@ def _get_secret_any(*paths):
     return None
 
 
-def get_admin_key() -> str:
-    v = _get_secret_any(["ADMIN_KEY"], ["general", "ADMIN_KEY"])
-    return str(v) if v else ""
-
-
-ADMIN_KEY = get_admin_key()
+ADMIN_KEY = str(_get_secret_any(["ADMIN_KEY"], ["general", "ADMIN_KEY"]) or "")
 
 
 def is_sheets_enabled() -> bool:
     if gspread is None:
         return False
-    sa  = _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
-    sid = _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
-    return bool(sa and sid)
+    return bool(
+        _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
+        and _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
+    )
 
 
 if not is_sheets_enabled():
@@ -340,7 +307,7 @@ def fetch_responses_df():
 
 
 # ─────────────────────────────────────────────────────────────
-# Helpers
+# Pure helpers
 # ─────────────────────────────────────────────────────────────
 def get_now_in_tz(tz_name: str) -> datetime:
     if ZoneInfo is None:
@@ -355,7 +322,7 @@ def parse_local_dt(value: str, tz_name: str) -> datetime:
     return dt_naive.replace(tzinfo=ZoneInfo(tz_name))
 
 
-def format_minutes_remaining(delta_seconds: float) -> str:
+def format_time_remaining(delta_seconds: float) -> str:
     mins  = max(0, int(delta_seconds // 60))
     hrs   = mins // 60
     rem_m = mins % 60
@@ -379,38 +346,26 @@ def _clean_cell(x) -> str:
 
 
 def age_display(age_raw: str) -> str:
-    """
-    Converts a plain age number to display format.
-    E.g. "11" → "Age 11 (Born 2015)"
-    If already formatted or non-numeric, returns as-is.
-    """
+    """'11' -> 'Age 11 (Born 2015)'. Already-formatted strings pass through."""
     age_str = _clean_cell(age_raw)
     if not age_str:
         return ""
-    # Already in long format
     if "Born" in age_str or "Age" in age_str:
         return age_str
     try:
-        age_int  = int(float(age_str))
-        born_yr  = datetime.now().year - age_int
-        return f"Age {age_int} (Born {born_yr})"
+        age_int = int(float(age_str))
+        return f"Age {age_int} (Born {datetime.now().year - age_int})"
     except Exception:
         return age_str
 
 
 def age_to_number(age_raw: str) -> str:
-    """
-    Normalises an age value to a plain integer string for storage.
-    "Age 11 (Born 2015)" → "11"
-    "11" → "11"
-    """
+    """'Age 11 (Born 2015)' -> '11'. Plain numbers pass through."""
     age_str = _clean_cell(age_raw)
     if not age_str:
         return ""
     if age_str.isdigit():
         return age_str
-    # Try extracting from "Age N ..."
-    import re
     m = re.search(r"\d+", age_str)
     return m.group() if m else age_str
 
@@ -438,6 +393,63 @@ def get_currently_open_week(deadlines: pd.DataFrame, base_tz: str):
     return candidates[0]
 
 
+# ─────────────────────────────────────────────────────────────
+# Registration helpers
+# ─────────────────────────────────────────────────────────────
+def is_duplicate_name(name: str, df: pd.DataFrame) -> bool:
+    existing = df["Name & Surname"].str.strip().str.lower().tolist()
+    return name.strip().lower() in existing
+
+
+def get_next_family_code(df: pd.DataFrame) -> int:
+    codes = pd.to_numeric(df["Family Code"], errors="coerce").dropna()
+    return int(codes.max()) + 1 if not codes.empty else 1
+
+
+def get_family_code_for_sibling(sibling_name: str, df: pd.DataFrame) -> str:
+    rows = df[df["Name & Surname"].str.strip() == sibling_name.strip()]
+    if rows.empty:
+        return ""
+    return _clean_cell(rows.iloc[0].get("Family Code", ""))
+
+
+def register_children_batch(children: list, family_code: str) -> int:
+    """
+    Writes all children in `children` (list of dicts with name/age) to uKids Kids SB.
+    Skips any whose name is already in the sheet (checked fresh).
+    Returns the count of rows actually written.
+    """
+    sh     = get_spreadsheet()
+    ws     = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
+    ws_ensure_header(ws, ["Family Code", "Name & Surname", "Age"])
+
+    # Fresh read to get the latest names for duplicate detection
+    _, _, latest_df = ws_get_values_and_df(ws)
+    if "Name & Surname" not in latest_df.columns:
+        existing_names = set()
+    else:
+        existing_names = set(latest_df["Name & Surname"].str.strip().str.lower().tolist())
+
+    rows_to_add   = []
+    skipped_names = []
+    for child in children:
+        name_clean = child["name"].strip()
+        if name_clean.lower() in existing_names:
+            skipped_names.append(name_clean)
+            continue
+        rows_to_add.append([family_code, name_clean, child["age"]])
+        existing_names.add(name_clean.lower())  # prevent within-batch duplicates
+
+    if rows_to_add:
+        gs_retry(ws.append_rows, rows_to_add)
+
+    fetch_sb_df.clear()
+    return len(rows_to_add), skipped_names
+
+
+# ─────────────────────────────────────────────────────────────
+# Admin panel
+# ─────────────────────────────────────────────────────────────
 def rebuild_final_schedule():
     sh       = get_spreadsheet()
     ws_raw   = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=300)
@@ -467,7 +479,7 @@ def rebuild_final_schedule():
 
 
 def show_admin_panel():
-    with st.expander("🔒 Admin"):
+    with st.expander("Admin"):
         if not ADMIN_KEY:
             st.info("Admin key is not set. Admin tools are open to anyone with the link.")
             unlocked = True
@@ -500,47 +512,6 @@ def show_admin_panel():
 
 
 # ─────────────────────────────────────────────────────────────
-# ★ NEW: Registration helpers
-# ─────────────────────────────────────────────────────────────
-def is_duplicate_name(name: str, df: pd.DataFrame) -> bool:
-    """Case-insensitive exact match on Name & Surname column."""
-    existing = df["Name & Surname"].str.strip().str.lower().tolist()
-    return name.strip().lower() in existing
-
-
-def get_next_family_code(df: pd.DataFrame) -> int:
-    """Returns the next integer family code (max existing + 1)."""
-    codes = pd.to_numeric(df["Family Code"], errors="coerce").dropna()
-    return int(codes.max()) + 1 if not codes.empty else 1
-
-
-def get_family_code_for_sibling(sibling_name: str, df: pd.DataFrame) -> str:
-    rows = df[df["Name & Surname"].str.strip() == sibling_name.strip()]
-    if rows.empty:
-        return ""
-    return _clean_cell(rows.iloc[0].get("Family Code", ""))
-
-
-def register_new_child(
-    child_name: str,
-    age_number: str,
-    family_code: str,
-) -> bool:
-    """
-    Appends the new child to uKids Kids SB.
-    Returns True on success, raises on failure.
-    """
-    sh     = get_spreadsheet()
-    ws     = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
-    header = ws_ensure_header(ws, ["Family Code", "Name & Surname", "Age"])
-    row    = [family_code, child_name.strip(), age_number]
-    gs_retry(ws.append_rows, [row])
-    # Bust the cache so the new child shows up immediately
-    fetch_sb_df.clear()
-    return True
-
-
-# ─────────────────────────────────────────────────────────────
 # Load config from Sheets
 # ─────────────────────────────────────────────────────────────
 try:
@@ -552,7 +523,6 @@ except Exception as e:
     show_admin_panel()
     st.stop()
 
-
 for needed, tab, df in [
     ({"service_date", "deadline_local", "timezone", "Opening date"}, TAB_DEADLINES, deadlines_df),
     ({"service_date", "date", "label", "is_service_day"},            TAB_DATES,     service_dates_all),
@@ -560,25 +530,24 @@ for needed, tab, df in [
 ]:
     miss = needed - set(df.columns)
     if miss:
-        st.error(f"Google Sheet tab '{tab}' is missing columns: {', '.join(sorted(miss))}")
+        st.error(f"Sheet tab '{tab}' is missing columns: {', '.join(sorted(miss))}")
         show_admin_panel()
         st.stop()
 
-
-# Normalise types
-deadlines_df["service_date"]  = deadlines_df["service_date"].astype(str).str.strip()
+# Normalise
+deadlines_df["service_date"]   = deadlines_df["service_date"].astype(str).str.strip()
 deadlines_df["deadline_local"] = deadlines_df["deadline_local"].astype(str).str.strip()
-deadlines_df["timezone"]      = deadlines_df["timezone"].astype(str).str.strip()
-deadlines_df["Opening date"]  = deadlines_df["Opening date"].astype(str).str.strip()
+deadlines_df["timezone"]       = deadlines_df["timezone"].astype(str).str.strip()
+deadlines_df["Opening date"]   = deadlines_df["Opening date"].astype(str).str.strip()
 
 service_dates_all["service_date"]   = service_dates_all["service_date"].astype(str).str.strip()
 service_dates_all["date"]           = service_dates_all["date"].astype(str).str.strip()
 service_dates_all["label"]          = service_dates_all["label"].astype(str).str.strip()
 service_dates_all["is_service_day"] = service_dates_all["is_service_day"].astype(str).str.strip()
 
-sb_df["Family Code"]   = sb_df["Family Code"].astype(str).str.strip()
+sb_df["Family Code"]    = sb_df["Family Code"].astype(str).str.strip()
 sb_df["Name & Surname"] = sb_df["Name & Surname"].astype(str).str.strip()
-sb_df["Age"]           = sb_df["Age"].astype(str).str.strip()
+sb_df["Age"]            = sb_df["Age"].astype(str).str.strip()
 
 BASE_TZ = "Africa/Johannesburg"
 try:
@@ -591,60 +560,87 @@ except Exception:
 service_date_key, opening_dt, deadline_dt, deadline_tz = get_currently_open_week(deadlines_df, BASE_TZ)
 
 
-# ─────────────────────────────────────────────────────────────
-# ★ REGISTRATION SECTION  (always visible, regardless of form window)
-# ─────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════
+# SECTION 1 — FAMILY REGISTRATION
+# Always shown so new families can register even when the
+# availability window is closed.
+# ═════════════════════════════════════════════════════════════
 st.markdown(
     """
 <div class="ukids-card ukids-card-amber">
-  <h3>➕ Register a new child</h3>
+  <h3>Register a new child or family</h3>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-with st.expander("Add a child who isn't on the list yet", expanded=False):
+with st.expander("Open registration form", expanded=False):
     st.caption(
-        "Only use this if your child does not appear in the dropdown below. "
-        "Registrations are reviewed and will be active for the next scheduling window."
+        "Use this section if any of your children are not yet on the list. "
+        "You can register your whole family at once. "
+        "Children already on the list will be skipped automatically."
     )
 
-    # ── Child details ──
-    reg_name = st.text_input(
-        "Child's full name (Name & Surname)",
-        placeholder="e.g. Levi Van der Vyver",
-        key="reg_name",
-    )
-
-    birth_year = st.number_input(
-        "Birth year",
-        min_value=2000,
-        max_value=datetime.now().year,
-        value=datetime.now().year - 8,
+    # ── How many children? ──
+    num_children = st.number_input(
+        "How many children are you registering?",
+        min_value=1,
+        max_value=MAX_CHILDREN_PER_REGISTRATION,
+        value=1,
         step=1,
-        key="reg_birth_year",
+        key="reg_num_children",
     )
-    reg_age_number = str(datetime.now().year - int(birth_year))
-    if reg_name:
-        st.caption(f"This will be stored as: **{age_display(reg_age_number)}**")
+
+    # ── Per-child inputs ──
+    reg_children = []
+    for i in range(int(num_children)):
+        ordinal = ["First", "Second", "Third", "Fourth", "Fifth"][i]
+        st.markdown(
+            f'<div class="child-block"><div class="child-block-label">{ordinal} child</div>',
+            unsafe_allow_html=True,
+        )
+        c_name = st.text_input(
+            "Full name (Name & Surname)",
+            placeholder="e.g. Levi Van der Vyver",
+            key=f"reg_child_name_{i}",
+        )
+        c_birth = st.number_input(
+            "Birth year",
+            min_value=2000,
+            max_value=datetime.now().year,
+            value=datetime.now().year - 8,
+            step=1,
+            key=f"reg_child_birth_{i}",
+        )
+        c_age = str(datetime.now().year - int(c_birth))
+        if c_name.strip():
+            st.caption(f"Will be stored as: **{age_display(c_age)}**")
+        st.markdown("</div>", unsafe_allow_html=True)
+        reg_children.append({"name": c_name.strip(), "age": c_age})
 
     # ── Family linking ──
-    st.markdown("**Link to a family** — is there an existing sibling already on the list?")
+    st.markdown("---")
+    st.markdown("**Is this family already partly on the list?**")
+    st.caption(
+        "If a sibling is already registered, pick their name so the new children "
+        "are added under the same family. Otherwise a new family code will be created."
+    )
+
     link_choice = st.radio(
-        "Family type",
-        options=["Yes – pick a sibling", "No – this is a brand-new family"],
+        "Family link",
+        options=["Yes — pick an existing sibling", "No — this is a brand-new family"],
         key="reg_link_choice",
         label_visibility="collapsed",
     )
 
-    chosen_sibling    = None
     resolved_fam_code = None
+    chosen_sibling    = None
 
-    if link_choice == "Yes – pick a sibling":
+    if link_choice == "Yes — pick an existing sibling":
         child_names_for_reg = sorted(
             {
-                name for name in sb_df["Name & Surname"].tolist()
-                if name and str(name).strip().lower() not in ("", "nan")
+                n for n in sb_df["Name & Surname"].tolist()
+                if n and str(n).strip().lower() not in ("", "nan")
             }
         )
         chosen_sibling = st.selectbox(
@@ -655,59 +651,80 @@ with st.expander("Add a child who isn't on the list yet", expanded=False):
         if chosen_sibling:
             resolved_fam_code = get_family_code_for_sibling(chosen_sibling, sb_df)
             if resolved_fam_code:
-                st.success(f"Will be added to Family Code **{resolved_fam_code}**.")
+                st.success(f"New children will be added to Family Code **{resolved_fam_code}**.")
             else:
-                st.error("Could not find a family code for that sibling.")
+                st.error("Could not find a family code for that sibling. Try the 'new family' option.")
     else:
         next_code         = get_next_family_code(sb_df)
         resolved_fam_code = str(next_code)
-        st.info(f"A new Family Code **{resolved_fam_code}** will be assigned.")
+        st.info(f"A new Family Code **{resolved_fam_code}** will be assigned to your family.")
 
-    # ── Submit registration ──
-    reg_ready = bool(
-        reg_name.strip()
-        and reg_age_number
-        and resolved_fam_code
-        and (link_choice != "Yes – pick a sibling" or chosen_sibling)
+    # ── Validate before enabling button ──
+    all_names_filled = all(c["name"] for c in reg_children)
+    sibling_resolved = (
+        link_choice != "Yes — pick an existing sibling"
+        or (chosen_sibling and resolved_fam_code)
     )
+    reg_ready = all_names_filled and sibling_resolved and resolved_fam_code
 
-    if st.button("Register child", disabled=not reg_ready, key="btn_register"):
-        name_clean = reg_name.strip()
+    if st.button("Register family", disabled=not reg_ready, key="btn_register"):
+        valid_children = [c for c in reg_children if c["name"]]
 
-        # Re-fetch latest SB to get freshest duplicate check
-        try:
-            fetch_sb_df.clear()
-            latest_sb = fetch_sb_df()
-        except Exception:
-            latest_sb = sb_df
+        # Check each name for duplicates before writing
+        duplicate_names = [
+            c["name"] for c in valid_children
+            if is_duplicate_name(c["name"], sb_df)
+        ]
+        non_duplicate_children = [
+            c for c in valid_children
+            if not is_duplicate_name(c["name"], sb_df)
+        ]
 
-        if is_duplicate_name(name_clean, latest_sb):
+        if duplicate_names and not non_duplicate_children:
+            # Every child entered is already on the list
             st.error(
-                f"**{name_clean}** is already on the list. "
-                "If you believe this is a different child with the same name, "
-                "please contact **Ps Somé** to have them added manually."
+                f"All the names you entered are already on the list: "
+                f"**{', '.join(duplicate_names)}**. "
+                "If you believe a child with the same name is being confused with yours, "
+                "please contact **Ps Some** to resolve this manually."
             )
         else:
             try:
-                register_new_child(name_clean, reg_age_number, resolved_fam_code)
-                # Refresh local sb_df for rest of session
-                sb_df = fetch_sb_df()
-                st.success(
-                    f"✅ **{name_clean}** has been registered "
-                    f"({age_display(reg_age_number)}, Family Code {resolved_fam_code}). "
-                    "They will appear in the availability form below — "
-                    "you can submit their availability right now!"
-                )
-                st.balloons()
+                written, skipped = register_children_batch(valid_children, resolved_fam_code)
+                sb_df = fetch_sb_df()  # refresh local copy
+
+                if written > 0:
+                    names_written = [
+                        c["name"] for c in valid_children
+                        if c["name"].lower() not in [s.lower() for s in skipped]
+                    ]
+                    st.success(
+                        f"Registered {written} child{'ren' if written != 1 else ''}: "
+                        f"**{', '.join(names_written)}** "
+                        f"(Family Code {resolved_fam_code}). "
+                        "They now appear in the availability form below."
+                    )
+                    st.balloons()
+
+                if skipped:
+                    st.warning(
+                        f"The following were already on the list and were skipped: "
+                        f"**{', '.join(skipped)}**. "
+                        "If you think this is a different child with the same name, "
+                        "please contact **Ps Some**."
+                    )
+
             except Exception as e:
                 st.error(f"Registration failed: {e}")
 
 
-# ─────────────────────────────────────────────────────────────
-# Gate: check if a scheduling window is open
-# ─────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════
+# SECTION 2 — AVAILABILITY FORM
+# ═════════════════════════════════════════════════════════════
+
+# Gate: form window must be open
 if not service_date_key:
-    st.markdown("## 🔒 No availability form is currently open.")
+    st.markdown("## No availability form is currently open.")
     show_admin_panel()
     st.stop()
 
@@ -717,9 +734,7 @@ week_dates = service_dates_all[
 ].copy()
 
 if week_dates.empty:
-    st.markdown(
-        f"## 🔒 No service dates found for **{service_date_key}**."
-    )
+    st.markdown(f"## No service dates found for **{service_date_key}**.")
     show_admin_panel()
     st.stop()
 
@@ -727,31 +742,26 @@ week_dates["_sort"] = week_dates["date"].map(_safe_parse_date_ymd)
 week_dates          = week_dates.sort_values("_sort").drop(columns=["_sort"])
 date_labels         = week_dates["label"].astype(str).tolist()
 
-now_local        = get_now_in_tz(deadline_tz)
+now_local         = get_now_in_tz(deadline_tz)
 remaining_seconds = (deadline_dt - now_local).total_seconds()
 
-# ── Info pill ──
 st.markdown(
     f"""
 <div class="info-pill">
-  🗓️ &nbsp;Submitting availability for <strong>{service_date_key}</strong><br>
-  📬 &nbsp;Form opened &nbsp;<strong>{opening_dt.strftime('%d %b %Y %H:%M')}</strong> ({deadline_tz})<br>
-  ⏳ &nbsp;Closes at &nbsp;<strong>{deadline_dt.strftime('%d %b %Y %H:%M')}</strong> &nbsp;—&nbsp;
-  <strong>{format_minutes_remaining(remaining_seconds)}</strong> remaining<br>
-  🔁 &nbsp;You can submit more than once.
+  Submitting availability for <strong>{service_date_key}</strong><br>
+  Form opened &nbsp;<strong>{opening_dt.strftime('%d %b %Y %H:%M')}</strong> ({deadline_tz})<br>
+  Closes at &nbsp;<strong>{deadline_dt.strftime('%d %b %Y %H:%M')}</strong>
+  &nbsp;&mdash;&nbsp;<strong>{format_time_remaining(remaining_seconds)}</strong> remaining<br>
+  You can submit more than once.
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-if st.button("🔄 Refresh timer"):
+if st.button("Refresh timer"):
     st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────
-# Child search → family lookup
-# ─────────────────────────────────────────────────────────────
-# Refresh sb_df in case a registration just happened this session
+# Refresh sb_df so a just-registered child appears in the dropdown
 try:
     sb_df = fetch_sb_df()
     sb_df["Family Code"]    = sb_df["Family Code"].astype(str).str.strip()
@@ -789,13 +799,10 @@ def get_kids_info_for_family_code(family_code: str) -> list:
     return out
 
 
-# ─────────────────────────────────────────────────────────────
-# Availability form UI
-# ─────────────────────────────────────────────────────────────
 st.markdown(
     """
 <div class="ukids-card">
-  <h3>👶 Select your child</h3>
+  <h3>Select your child</h3>
 </div>
 """,
     unsafe_allow_html=True,
@@ -809,7 +816,7 @@ selected_child = st.selectbox(
 )
 
 if not selected_child:
-    st.caption("Search for and select one child to load your family's availability form.")
+    st.caption("Select one child to load your family's full availability form.")
     show_admin_panel()
     st.stop()
 
@@ -830,31 +837,24 @@ if not kids_info:
 st.markdown(
     f"""
 <div class="ukids-card">
-  <h3>📋 Availability for {service_date_key}</h3>
+  <h3>Availability for {service_date_key}</h3>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
 kids_selected_map: dict = {}
-avatars = ["🧒", "👦", "👧", "🧑", "👶"]
 
 for k in kids_info:
     slot     = k["slot"]
     kid_name = k["name"]
     kid_age  = age_display(k["age"])
-    avatar   = avatars[(slot - 1) % len(avatars)]
 
     st.markdown(
         f"""
 <div class="ukids-card">
-  <div class="kid-header">
-    <div class="kid-avatar">{avatar}</div>
-    <div>
-      <div class="kid-name">{kid_name}</div>
-      <div class="kid-age">{kid_age}</div>
-    </div>
-  </div>
+  <div class="kid-name">{kid_name}</div>
+  <div class="kid-age">{kid_age}</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -871,15 +871,15 @@ for k in kids_info:
     st.divider()
 
 
-# ── Review summary ──
-st.markdown("### 📝 Review")
+# Summary
+st.markdown("### Review")
 for k in kids_info:
     count = len(kids_selected_map.get(k["slot"], set()))
     label = "service" if count == 1 else "services"
     st.write(f"**{k['name']}** — {count} {label} selected")
 
 st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
-submitted = st.button("✅ Submit availability")
+submitted = st.button("Submit availability")
 st.markdown("</div>", unsafe_allow_html=True)
 
 if submitted:
@@ -893,7 +893,7 @@ if submitted:
     rows_to_write  = []
 
     for k in kids_info:
-        slot             = k["slot"]
+        slot              = k["slot"]
         selected_services = kids_selected_map.get(slot, set())
         row_map = {
             "timestamp":    now_iso,
@@ -908,9 +908,10 @@ if submitted:
 
     try:
         append_multiple_rows(TAB_RESPONSES, desired_header, rows_to_write)
+        n = len(rows_to_write)
         st.success(
-            f"🎉 Submitted! Availability saved for "
-            f"{len(rows_to_write)} child{'ren' if len(rows_to_write) != 1 else ''}."
+            f"Submitted. Availability saved for "
+            f"{n} child{'ren' if n != 1 else ''}."
         )
         st.balloons()
     except Exception as e:
