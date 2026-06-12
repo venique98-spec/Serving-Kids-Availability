@@ -702,93 +702,88 @@ if is_open:
 
     if not selected_child:
         st.caption("Select one child to load your whole family's form.")
-        show_admin_panel()
-        st.stop()
 
-    family_code = get_family_code_for_child(selected_child)
-    if not family_code:
-        st.error("Could not find a family code for that child.")
-        show_admin_panel()
-        st.stop()
+    else:
+        family_code = get_family_code_for_child(selected_child)
+        if not family_code:
+            st.error("Could not find a family code for that child.")
 
-    kids_info = get_kids_info(family_code)
-    if not kids_info:
-        st.warning("No children found for this family in the sheet.")
-        show_admin_panel()
-        st.stop()
+        else:
+            kids_info = get_kids_info(family_code)
+            if not kids_info:
+                st.warning("No children found for this family in the sheet.")
 
-    # ── Per-child checkboxes ──
-    st.markdown(f"""
+            else:
+                # ── Per-child checkboxes ──
+                st.markdown(f"""
 <div class="ukids-card ukids-card-purple">
   <span class="section-pill">Step 2</span>
   <h3>Select services — {service_date_key}</h3>
 </div>
 """, unsafe_allow_html=True)
 
-    kids_selected_map: dict = {}
+                kids_selected_map: dict = {}
 
-    for k in kids_info:
-        slot    = k["slot"]
-        k_name  = k["name"]
-        k_age   = age_display(k["age"])
+                for k in kids_info:
+                    slot    = k["slot"]
+                    k_name  = k["name"]
+                    k_age   = age_display(k["age"])
 
-        st.markdown(f"""
+                    st.markdown(f"""
 <div class="kid-block">
   <div class="kid-name">{k_name}</div>
   <div class="kid-age">{k_age}</div>
 </div>
 """, unsafe_allow_html=True)
-        st.caption("Which services can this child attend?")
+                    st.caption("Which services can this child attend?")
 
-        selected_labels = []
-        for svc in date_labels:
-            key = f"slot{slot}_svc_{service_date_key}_{svc}"
-            if st.checkbox(svc, key=key):
-                selected_labels.append(svc)
-        kids_selected_map[slot] = set(selected_labels)
-        st.divider()
+                    selected_labels = []
+                    for svc in date_labels:
+                        key = f"slot{slot}_svc_{service_date_key}_{svc}"
+                        if st.checkbox(svc, key=key):
+                            selected_labels.append(svc)
+                    kids_selected_map[slot] = set(selected_labels)
+                    st.divider()
 
-    # ── Review & submit ──
-    st.markdown("**Review**")
-    for k in kids_info:
-        count = len(kids_selected_map.get(k["slot"], set()))
-        st.write(f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected")
+                # ── Review & submit ──
+                st.markdown("**Review**")
+                for k in kids_info:
+                    count = len(kids_selected_map.get(k["slot"], set()))
+                    st.write(f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected")
 
-    st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
-    submitted = st.button("Submit availability")
-    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
+                submitted = st.button("Submit availability")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-    if submitted:
-        # Re-check window hasn't just closed
-        is_still_open, _, _, deadline_recheck, now_recheck = get_window()
-        if not is_still_open:
-            st.error("The form has just closed. Submissions are no longer accepted.")
-            st.stop()
+                if submitted:
+                    is_still_open, _, _, _, _ = get_window()
+                    if not is_still_open:
+                        st.error("The form has just closed. Submissions are no longer accepted.")
+                    else:
+                        now_iso        = datetime.utcnow().isoformat() + "Z"
+                        desired_header = ["timestamp", "Service date", "Family Code", "Name", "Age"] + date_labels
+                        rows_to_write  = []
 
-        now_iso        = datetime.utcnow().isoformat() + "Z"
-        desired_header = ["timestamp", "Service date", "Family Code", "Name", "Age"] + date_labels
-        rows_to_write  = []
+                        for k in kids_info:
+                            slot = k["slot"]
+                            row_map = {
+                                "timestamp":    now_iso,
+                                "Service date": service_date_key,
+                                "Family Code":  family_code,
+                                "Name":         k["name"],
+                                "Age":          age_to_number(k["age"]),
+                            }
+                            for svc in date_labels:
+                                row_map[svc] = "Yes" if svc in kids_selected_map.get(slot, set()) else "No"
+                            rows_to_write.append(row_map)
 
-        for k in kids_info:
-            slot = k["slot"]
-            row_map = {
-                "timestamp":    now_iso,
-                "Service date": service_date_key,
-                "Family Code":  family_code,
-                "Name":         k["name"],
-                "Age":          age_to_number(k["age"]),
-            }
-            for svc in date_labels:
-                row_map[svc] = "Yes" if svc in kids_selected_map.get(slot, set()) else "No"
-            rows_to_write.append(row_map)
-
-        try:
-            append_multiple_rows(TAB_RESPONSES, desired_header, rows_to_write)
-            n = len(rows_to_write)
-            st.success(f"Submitted. Availability saved for {n} child{'ren' if n != 1 else ''}.")
-            st.balloons()
-        except Exception as e:
-            st.error(f"Failed to save: {e}")
+                        try:
+                            append_multiple_rows(TAB_RESPONSES, desired_header, rows_to_write)
+                            n = len(rows_to_write)
+                            st.success(f"Submitted. Availability saved for {n} child{'ren' if n != 1 else ''}.")
+                            st.balloons()
+                        except Exception as e:
+                            st.error(f"Failed to save: {e}")
 
 else:
     # Form is closed — show next window info
