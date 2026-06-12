@@ -106,14 +106,6 @@ st.markdown(f"""
     width: 110px; height: 110px;
     background: var(--purple); border-radius: 50%; opacity: 0.22;
   }}
-  /* SVG deco layer inside hero: dots + stars */
-  .ukids-hero-deco {{
-    position: absolute; inset: 0; pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='160'%3E%3Ccircle cx='20' cy='20' r='4' fill='%23fff' opacity='.25'/%3E%3Ccircle cx='80' cy='50' r='3' fill='%23F5C842' opacity='.45'/%3E%3Ccircle cx='140' cy='15' r='5' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='200' cy='55' r='3' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='260' cy='20' r='4' fill='%23fff' opacity='.22'/%3E%3Ccircle cx='330' cy='60' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='390' cy='18' r='5' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='450' cy='55' r='3' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='510' cy='22' r='4' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='570' cy='50' r='3' fill='%23fff' opacity='.25'/%3E%3Ccircle cx='50' cy='120' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='115' cy='140' r='4' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='185' cy='115' r='3' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='250' cy='145' r='5' fill='%23fff' opacity='.18'/%3E%3Ccircle cx='320' cy='118' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='385' cy='142' r='4' fill='%23fff' opacity='.22'/%3E%3Ccircle cx='455' cy='120' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='520' cy='145' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='580' cy='125' r='3' fill='%23fff' opacity='.2'/%3E%3Cpath d='M105 75 l3-9 3 9-9-3 9 3z' fill='%23fff' opacity='.3'/%3E%3Cpath d='M295 80 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.5'/%3E%3Cpath d='M480 72 l3-9 3 9-9-3 9 3z' fill='%23fff' opacity='.35'/%3E%3Cpath d='M560 90 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M40 90 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.45'/%3E%3C/svg%3E");
-    background-repeat: repeat-x;
-    background-size: 600px 160px;
-    opacity: 0.9;
-  }}
   .ukids-hero-content {{ position: relative; z-index: 2; }}
   .ukids-hero h1 {{
     font-size: 2rem; font-weight: 900;
@@ -146,7 +138,7 @@ st.markdown(f"""
 
   /* ── Info banner ── */
   .info-banner {{
-    background: linear-gradient(135deg, var(--teal) 0%, #7BD4D0 100%);
+    background: linear-gradient(135deg, var(--purple) 0%, #9B6FC6 100%);
     border-radius: 12px; padding: 14px 18px;
     font-size: 0.88rem; color: var(--white);
     margin-bottom: 16px; line-height: 1.75;
@@ -233,7 +225,6 @@ st.markdown(f"""
 # ── Hero with deco layer ──
 st.markdown("""
 <div class="ukids-hero">
-  <div class="ukids-hero-deco"></div>
   <div class="ukids-hero-content">
     <h1>uKids Availability</h1>
     <p>Let us know which services your children can serve at this week.</p>
