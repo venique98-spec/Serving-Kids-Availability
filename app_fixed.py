@@ -78,40 +78,56 @@ st.markdown(f"""
     --muted:   {MUTED};
   }}
 
-  /* ── Background ── */
-  .stApp {{ background: var(--cream); }}
+  /* ── Page background with scattered dots, stars, blobs via SVG data URI ── */
+  .stApp {{
+    background-color: {CREAM};
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='900'%3E%3C!-- ── round dots ── --%3E%3Ccircle cx='42' cy='60' r='5' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='120' cy='30' r='3.5' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='210' cy='80' r='4' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='310' cy='20' r='3' fill='%23F5C842' opacity='.45'/%3E%3Ccircle cx='400' cy='65' r='5' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='500' cy='18' r='4' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='600' cy='50' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='700' cy='30' r='5' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='790' cy='70' r='4' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='860' cy='25' r='3' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='30' cy='200' r='4' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='160' cy='170' r='5' fill='%237B4FA6' opacity='.25'/%3E%3Ccircle cx='270' cy='210' r='3' fill='%235BC4C0' opacity='.4'/%3E%3Ccircle cx='380' cy='190' r='4' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='490' cy='220' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='590' cy='175' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='680' cy='200' r='4' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='780' cy='185' r='3.5' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='870' cy='210' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='70' cy='360' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='190' cy='340' r='5' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='320' cy='370' r='4' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='440' cy='345' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='560' cy='380' r='5' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='660' cy='350' r='3' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='760' cy='375' r='4' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='850' cy='355' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='50' cy='530' r='4' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='175' cy='510' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='300' cy='545' r='5' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='420' cy='520' r='3.5' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='530' cy='550' r='4' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='640' cy='515' r='3' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='745' cy='540' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='840' cy='525' r='4' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='90' cy='700' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='215' cy='680' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='345' cy='710' r='3.5' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='470' cy='690' r='4' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='580' cy='715' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='690' cy='695' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='800' cy='720' r='4' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='880' cy='700' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='30' cy='860' r='4' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='155' cy='845' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='280' cy='870' r='5' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='400' cy='850' r='3.5' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='510' cy='875' r='4' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='630' cy='860' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='740' cy='880' r='5' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='860' cy='855' r='4' fill='%237B4FA6' opacity='.35'/%3E%3C!-- ── 4-point stars ── --%3E%3Cpath d='M80 130 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M250 100 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.45'/%3E%3Cpath d='M450 125 l4-12 4 12-12-4 12 4z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M640 95 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.5'/%3E%3Cpath d='M820 120 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M140 290 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M360 275 l4-12 4 12-12-4 12 4z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M570 295 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M760 270 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M60 450 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.4'/%3E%3Cpath d='M230 465 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M430 455 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.35'/%3E%3Cpath d='M620 470 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M820 450 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M110 620 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M330 610 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.35'/%3E%3Cpath d='M520 625 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M710 615 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M870 630 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M50 790 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M200 775 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M390 800 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M590 780 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M780 795 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3C!-- ── pebble / teardrop blobs ── --%3E%3Cellipse cx='900' cy='110' rx='48' ry='35' fill='%23E8724A' opacity='.12' transform='rotate(-20 900 110)'/%3E%3Cellipse cx='0' cy='420' rx='55' ry='38' fill='%237B4FA6' opacity='.1' transform='rotate(15 0 420)'/%3E%3Cellipse cx='900' cy='680' rx='50' ry='34' fill='%235BC4C0' opacity='.11' transform='rotate(-10 900 680)'/%3E%3Cellipse cx='0' cy='830' rx='42' ry='30' fill='%23F5C842' opacity='.15' transform='rotate(25 0 830)'/%3E%3Cellipse cx='450' cy='0' rx='60' ry='22' fill='%237B4FA6' opacity='.1' transform='rotate(5 450 0)'/%3E%3Cellipse cx='200' cy='900' rx='55' ry='20' fill='%23E8724A' opacity='.1' transform='rotate(-8 200 900)'/%3E%3Cellipse cx='720' cy='900' rx='50' ry='18' fill='%235BC4C0' opacity='.12' transform='rotate(12 720 900)'/%3E%3C!-- ── wavy dash lines ── --%3E%3Cpath d='M0 155 q45-18 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%235BC4C0' stroke-width='2' fill='none' stroke-dasharray='6 8' opacity='.2'/%3E%3Cpath d='M0 480 q45 18 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%23E8724A' stroke-width='2' fill='none' stroke-dasharray='4 10' opacity='.18'/%3E%3Cpath d='M0 760 q45-15 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%237B4FA6' stroke-width='2' fill='none' stroke-dasharray='5 9' opacity='.18'/%3E%3C!-- ── corner wave blobs (like the source image) ── --%3E%3Cpath d='M900 0 Q820 80 900 160' stroke='%23E8724A' stroke-width='18' fill='none' opacity='.18' stroke-linecap='round'/%3E%3Cpath d='M0 740 Q80 820 0 900' stroke='%237B4FA6' stroke-width='18' fill='none' opacity='.18' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 900px 900px;
+  }}
   section[data-testid="stSidebar"] {{ display: none; }}
 
   /* ── Hero ── */
   .ukids-hero {{
     background: var(--teal);
     border-radius: 20px;
-    padding: 32px 28px 26px;
+    padding: 34px 28px 28px;
     margin-bottom: 28px;
     text-align: center;
     position: relative;
     overflow: hidden;
   }}
+  /* large blob top-right */
   .ukids-hero::before {{
     content: '';
-    position: absolute; top: -30px; right: -30px;
-    width: 120px; height: 120px;
-    background: var(--orange); border-radius: 50%; opacity: 0.25;
+    position: absolute; top: -40px; right: -40px;
+    width: 160px; height: 160px;
+    background: var(--orange); border-radius: 50%; opacity: 0.28;
   }}
+  /* large blob bottom-left */
   .ukids-hero::after {{
     content: '';
-    position: absolute; bottom: -20px; left: -20px;
-    width: 80px; height: 80px;
-    background: var(--purple); border-radius: 50%; opacity: 0.2;
+    position: absolute; bottom: -30px; left: -30px;
+    width: 110px; height: 110px;
+    background: var(--purple); border-radius: 50%; opacity: 0.22;
   }}
+  /* SVG deco layer inside hero: dots + stars */
+  .ukids-hero-deco {{
+    position: absolute; inset: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='160'%3E%3Ccircle cx='20' cy='20' r='4' fill='%23fff' opacity='.25'/%3E%3Ccircle cx='80' cy='50' r='3' fill='%23F5C842' opacity='.45'/%3E%3Ccircle cx='140' cy='15' r='5' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='200' cy='55' r='3' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='260' cy='20' r='4' fill='%23fff' opacity='.22'/%3E%3Ccircle cx='330' cy='60' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='390' cy='18' r='5' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='450' cy='55' r='3' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='510' cy='22' r='4' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='570' cy='50' r='3' fill='%23fff' opacity='.25'/%3E%3Ccircle cx='50' cy='120' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='115' cy='140' r='4' fill='%23fff' opacity='.2'/%3E%3Ccircle cx='185' cy='115' r='3' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='250' cy='145' r='5' fill='%23fff' opacity='.18'/%3E%3Ccircle cx='320' cy='118' r='3' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='385' cy='142' r='4' fill='%23fff' opacity='.22'/%3E%3Ccircle cx='455' cy='120' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='520' cy='145' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='580' cy='125' r='3' fill='%23fff' opacity='.2'/%3E%3Cpath d='M105 75 l3-9 3 9-9-3 9 3z' fill='%23fff' opacity='.3'/%3E%3Cpath d='M295 80 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.5'/%3E%3Cpath d='M480 72 l3-9 3 9-9-3 9 3z' fill='%23fff' opacity='.35'/%3E%3Cpath d='M560 90 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M40 90 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.45'/%3E%3C/svg%3E");
+    background-repeat: repeat-x;
+    background-size: 600px 160px;
+    opacity: 0.9;
+  }}
+  .ukids-hero-content {{ position: relative; z-index: 2; }}
   .ukids-hero h1 {{
     font-size: 2rem; font-weight: 900;
     color: var(--white); margin: 0 0 6px;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.5px; text-shadow: 0 2px 8px rgba(0,0,0,0.15);
   }}
   .ukids-hero p {{
     font-size: 1rem; color: var(--white);
-    opacity: 0.92; margin: 0;
+    opacity: 0.93; margin: 0;
   }}
 
   /* ── Cards ── */
@@ -219,11 +235,14 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Hero ──
+# ── Hero with deco layer ──
 st.markdown("""
 <div class="ukids-hero">
-  <h1>uKids Availability</h1>
-  <p>Let us know which services your children can serve at this week.</p>
+  <div class="ukids-hero-deco"></div>
+  <div class="ukids-hero-content">
+    <h1>uKids Availability</h1>
+    <p>Let us know which services your children can serve at this week.</p>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
