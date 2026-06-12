@@ -78,13 +78,8 @@ st.markdown(f"""
     --muted:   {MUTED};
   }}
 
-  /* ── Page background with scattered dots, stars, blobs via SVG data URI ── */
-  .stApp {{
-    background-color: {CREAM};
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='900'%3E%3C!-- ── round dots ── --%3E%3Ccircle cx='42' cy='60' r='5' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='120' cy='30' r='3.5' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='210' cy='80' r='4' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='310' cy='20' r='3' fill='%23F5C842' opacity='.45'/%3E%3Ccircle cx='400' cy='65' r='5' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='500' cy='18' r='4' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='600' cy='50' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='700' cy='30' r='5' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='790' cy='70' r='4' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='860' cy='25' r='3' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='30' cy='200' r='4' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='160' cy='170' r='5' fill='%237B4FA6' opacity='.25'/%3E%3Ccircle cx='270' cy='210' r='3' fill='%235BC4C0' opacity='.4'/%3E%3Ccircle cx='380' cy='190' r='4' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='490' cy='220' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='590' cy='175' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='680' cy='200' r='4' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='780' cy='185' r='3.5' fill='%23E8724A' opacity='.4'/%3E%3Ccircle cx='870' cy='210' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='70' cy='360' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='190' cy='340' r='5' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='320' cy='370' r='4' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='440' cy='345' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='560' cy='380' r='5' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='660' cy='350' r='3' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='760' cy='375' r='4' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='850' cy='355' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='50' cy='530' r='4' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='175' cy='510' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='300' cy='545' r='5' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='420' cy='520' r='3.5' fill='%23F5C842' opacity='.4'/%3E%3Ccircle cx='530' cy='550' r='4' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='640' cy='515' r='3' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='745' cy='540' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='840' cy='525' r='4' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='90' cy='700' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='215' cy='680' r='5' fill='%23F5C842' opacity='.35'/%3E%3Ccircle cx='345' cy='710' r='3.5' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='470' cy='690' r='4' fill='%237B4FA6' opacity='.35'/%3E%3Ccircle cx='580' cy='715' r='3' fill='%235BC4C0' opacity='.3'/%3E%3Ccircle cx='690' cy='695' r='5' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='800' cy='720' r='4' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='880' cy='700' r='3' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='30' cy='860' r='4' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='155' cy='845' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='280' cy='870' r='5' fill='%237B4FA6' opacity='.3'/%3E%3Ccircle cx='400' cy='850' r='3.5' fill='%23E8724A' opacity='.35'/%3E%3Ccircle cx='510' cy='875' r='4' fill='%23F5C842' opacity='.3'/%3E%3Ccircle cx='630' cy='860' r='3' fill='%235BC4C0' opacity='.35'/%3E%3Ccircle cx='740' cy='880' r='5' fill='%23E8724A' opacity='.3'/%3E%3Ccircle cx='860' cy='855' r='4' fill='%237B4FA6' opacity='.35'/%3E%3C!-- ── 4-point stars ── --%3E%3Cpath d='M80 130 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M250 100 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.45'/%3E%3Cpath d='M450 125 l4-12 4 12-12-4 12 4z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M640 95 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.5'/%3E%3Cpath d='M820 120 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M140 290 l3-9 3 9-9-3 9 3z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M360 275 l4-12 4 12-12-4 12 4z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M570 295 l3-9 3 9-9-3 9 3z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M760 270 l4-12 4 12-12-4 12 4z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M60 450 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.4'/%3E%3Cpath d='M230 465 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M430 455 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.35'/%3E%3Cpath d='M620 470 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M820 450 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M110 620 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.4'/%3E%3Cpath d='M330 610 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.35'/%3E%3Cpath d='M520 625 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M710 615 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M870 630 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M50 790 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3Cpath d='M200 775 l3-9 3 9-9-3 9 3z' fill='%235BC4C0' opacity='.4'/%3E%3Cpath d='M390 800 l4-12 4 12-12-4 12 4z' fill='%23F5C842' opacity='.45'/%3E%3Cpath d='M590 780 l3-9 3 9-9-3 9 3z' fill='%237B4FA6' opacity='.35'/%3E%3Cpath d='M780 795 l4-12 4 12-12-4 12 4z' fill='%23E8724A' opacity='.4'/%3E%3C!-- ── pebble / teardrop blobs ── --%3E%3Cellipse cx='900' cy='110' rx='48' ry='35' fill='%23E8724A' opacity='.12' transform='rotate(-20 900 110)'/%3E%3Cellipse cx='0' cy='420' rx='55' ry='38' fill='%237B4FA6' opacity='.1' transform='rotate(15 0 420)'/%3E%3Cellipse cx='900' cy='680' rx='50' ry='34' fill='%235BC4C0' opacity='.11' transform='rotate(-10 900 680)'/%3E%3Cellipse cx='0' cy='830' rx='42' ry='30' fill='%23F5C842' opacity='.15' transform='rotate(25 0 830)'/%3E%3Cellipse cx='450' cy='0' rx='60' ry='22' fill='%237B4FA6' opacity='.1' transform='rotate(5 450 0)'/%3E%3Cellipse cx='200' cy='900' rx='55' ry='20' fill='%23E8724A' opacity='.1' transform='rotate(-8 200 900)'/%3E%3Cellipse cx='720' cy='900' rx='50' ry='18' fill='%235BC4C0' opacity='.12' transform='rotate(12 720 900)'/%3E%3C!-- ── wavy dash lines ── --%3E%3Cpath d='M0 155 q45-18 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%235BC4C0' stroke-width='2' fill='none' stroke-dasharray='6 8' opacity='.2'/%3E%3Cpath d='M0 480 q45 18 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%23E8724A' stroke-width='2' fill='none' stroke-dasharray='4 10' opacity='.18'/%3E%3Cpath d='M0 760 q45-15 90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0 t90 0' stroke='%237B4FA6' stroke-width='2' fill='none' stroke-dasharray='5 9' opacity='.18'/%3E%3C!-- ── corner wave blobs (like the source image) ── --%3E%3Cpath d='M900 0 Q820 80 900 160' stroke='%23E8724A' stroke-width='18' fill='none' opacity='.18' stroke-linecap='round'/%3E%3Cpath d='M0 740 Q80 820 0 900' stroke='%237B4FA6' stroke-width='18' fill='none' opacity='.18' stroke-linecap='round'/%3E%3C/svg%3E");
-    background-repeat: repeat;
-    background-size: 900px 900px;
-  }}
+  /* ── Background ── */
+  .stApp {{ background: var(--cream); }}
   section[data-testid="stSidebar"] {{ display: none; }}
 
   /* ── Hero ── */
@@ -417,7 +412,7 @@ def get_window() -> tuple:
     monday = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
 
     opening_dt  = monday.replace(hour=5,  minute=0,  second=0, microsecond=0)
-    deadline_dt = monday.replace(hour=12, minute=0,  second=0, microsecond=0) + timedelta(days=3)  # Thursday
+    deadline_dt = monday.replace(hour=23, minute=0,  second=0, microsecond=0) + timedelta(days=5)  # Saturday 23:00
     sunday_dt   = monday + timedelta(days=6)
     service_date_str = sunday_dt.strftime("%Y-%m-%d")
 
@@ -810,7 +805,7 @@ else:
     now   = get_now_sast()
     wday  = now.weekday()   # Mon=0 … Sun=6
     if wday == 0 and now.hour >= 5:
-        # Past Monday 05:00 but Thursday 12:00 already passed — next Monday
+        # Past Monday 05:00 but Saturday 23:00 already passed — next Monday
         days_to_next_monday = 7
     else:
         days_to_next_monday = (7 - wday) % 7 or 7
@@ -818,8 +813,8 @@ else:
     next_monday  = (now + timedelta(days=days_to_next_monday)).replace(
         hour=5, minute=0, second=0, microsecond=0
     )
-    next_sunday  = next_monday + timedelta(days=6)
-    next_deadline = next_monday + timedelta(days=3, hours=7)  # Thursday 12:00
+    next_sunday   = next_monday + timedelta(days=6)
+    next_deadline = next_monday + timedelta(days=5, hours=18)  # Saturday 23:00
 
     st.markdown(f"""
 <div class="closed-banner">
