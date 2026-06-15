@@ -288,97 +288,58 @@ def ws_ensure_header(ws, desired_header: list) -> list:
     return header
 
 
-# ─────────────────────────────────────────────────────────────
-# Weekly tab upsert
-# ─────────────────────────────────────────────────────────────
-BASE_COLS = ["timestamp", "Service date", "Family Code", "Name", "Age"]
 
-def upsert_weekly_tab(service_date_str: str, rows_to_write: list, service_labels: list):
+
+# ─────────────────────────────────────────────────────────────
+# Sheet writing — Master Log + auto weekly summary
+# ─────────────────────────────────────────────────────────────
+TAB_MASTER = "Master Log"
+BASE_COLS  = ["timestamp", "Service date", "Family Code", "Name", "Age"]
+FLAT_COLS  = ["timestamp", "Service date", "Service", "Name", "Age"]
+
+
+def append_to_master_log(rows_to_write: list, service_labels: list):
     """
-    Write rows to the weekly tab (e.g. '22 Jun 2026').
-    - Tab is created automatically if it doesn't exist.
-    - Each child is upserted by Name: existing row replaced, new child appended.
-    - After writing, rebuilds 'Final Schedule' automatically.
+    Appends every submission raw to 'Master Log'.
+    Columns: timestamp | Service date | Family Code | Name | Age | <service labels>
+    Every submit = new rows, nothing is ever overwritten here.
+    """
+    sh             = get_spreadsheet()
+    desired_header = BASE_COLS + service_labels
+    ws             = ensure_worksheet(sh, TAB_MASTER, rows=20000, cols=len(desired_header) + 5)
+    ws_ensure_header(ws, desired_header)
+    rows_as_lists  = [[r.get(c, "") for c in desired_header] for r in rows_to_write]
+    gs_retry(ws.append_rows, rows_as_lists)
+
+
+def build_weekly_summary(service_date_str: str, service_labels: list):
+    """
+    Reads Master Log, filters to this week, keeps only the LATEST
+    submission per child, flattens to one row per child per Yes service,
+    and writes to a tab named e.g. '22 Jun 2026'.
+    Format: timestamp | Service date | Service | Name | Age
     """
     sh       = get_spreadsheet()
     tab_name = weekly_tab_name(service_date_str)
-    ws       = ensure_worksheet(sh, tab_name, rows=2000, cols=len(BASE_COLS) + len(service_labels) + 5)
 
-    desired_header = BASE_COLS + service_labels
-    current_header = gs_retry(ws.row_values, 1)
+    ws_master = ensure_worksheet(sh, TAB_MASTER, rows=20000, cols=100)
+    _, _, df  = ws_get_values_and_df(ws_master)
 
-    # If tab is brand new, write header and append all rows
-    if not current_header:
-        gs_retry(ws.update, "1:1", [desired_header])
-        rows_as_lists = [[r.get(c, "") for c in desired_header] for r in rows_to_write]
-        gs_retry(ws.append_rows, rows_as_lists)
-        _rebuild_final_schedule(sh, ws, desired_header, service_labels)
+    if df.empty or "Service date" not in df.columns:
         return
 
-    # Tab already exists — read current data, upsert by Name
-    _, _, df = ws_get_values_and_df(ws)
-
-    # Ensure any new service columns exist in the header
-    missing = [c for c in desired_header if c not in df.columns]
-    if missing:
-        for col in missing:
-            df[col] = ""
-        # Rewrite header row with new columns
-        full_header = list(df.columns)
-        gs_retry(ws.update, "1:1", [full_header])
-        desired_header = full_header
-
-    # Build a dict of existing rows keyed by Name for quick lookup
-    # We'll track which sheet row number each name occupies (1-indexed, +1 for header)
-    name_to_row_idx: dict = {}
-    for i, row in df.iterrows():
-        name = str(row.get("Name", "")).strip().lower()
-        if name:
-            name_to_row_idx[name] = i + 2  # +1 for 0-index, +1 for header row
-
-    rows_to_append = []
-
-    for new_row in rows_to_write:
-        child_name = str(new_row.get("Name", "")).strip().lower()
-        row_values = [new_row.get(c, "") for c in desired_header]
-
-        if child_name in name_to_row_idx:
-            # Replace existing row in-place
-            sheet_row = name_to_row_idx[child_name]
-            cell_range = f"A{sheet_row}"
-            gs_retry(ws.update, cell_range, [row_values])
-        else:
-            # New child — queue for append
-            rows_to_append.append(row_values)
-
-    if rows_to_append:
-        gs_retry(ws.append_rows, rows_to_append)
-
-    # Rebuild Final Schedule from the now-updated weekly tab
-    _, _, updated_df = ws_get_values_and_df(ws)
-    _rebuild_final_schedule(sh, ws, desired_header, service_labels, updated_df)
-
-
-def _rebuild_final_schedule(sh, weekly_ws, header: list, service_labels: list, df: pd.DataFrame = None):
-    """
-    Rebuilds 'Final Schedule' from the weekly tab.
-    Format: timestamp | Service date | Service | Name | Age
-    One row per child per service they said Yes to.
-    """
-    ws_final     = ensure_worksheet(sh, TAB_FINAL, rows=5000, cols=10)
-    final_header = ["timestamp", "Service date", "Service", "Name", "Age"]
-
-    if df is None:
-        _, _, df = ws_get_values_and_df(weekly_ws)
-
-    ws_final.clear()
-    gs_retry(ws_final.update, "A1", [final_header])
-
-    if df.empty:
+    week_df = df[df["Service date"].str.strip() == service_date_str].copy()
+    if week_df.empty:
         return
 
+    # Latest submission per child
+    if "timestamp" in week_df.columns:
+        week_df = week_df.sort_values("timestamp")
+    week_df = week_df.drop_duplicates(subset=["Name"], keep="last")
+
+    # Flatten to one row per Yes service
     rows_out = []
-    for _, row in df.iterrows():
+    for _, row in week_df.iterrows():
         for svc in service_labels:
             if str(row.get(svc, "")).strip().lower() == "yes":
                 rows_out.append([
@@ -389,8 +350,36 @@ def _rebuild_final_schedule(sh, weekly_ws, header: list, service_labels: list, d
                     row.get("Age", ""),
                 ])
 
+    ws_week = ensure_worksheet(sh, tab_name, rows=2000, cols=10)
+    ws_week.clear()
+    gs_retry(ws_week.update, "A1", [FLAT_COLS])
     if rows_out:
-        gs_retry(ws_final.append_rows, rows_out)
+        gs_retry(ws_week.append_rows, rows_out)
+
+
+def maybe_build_weekly_summary(service_date_str: str, service_labels: list):
+    """
+    Called on every page load. If the window has closed and the weekly
+    summary tab doesn't exist yet (or is empty), builds it automatically.
+    Safe to call repeatedly — does nothing if already built.
+    """
+    is_open, _, _, _, _ = get_window()
+    if is_open:
+        return  # Window still open — don't build yet
+
+    sh       = get_spreadsheet()
+    tab_name = weekly_tab_name(service_date_str)
+
+    try:
+        ws_existing = sh.worksheet(tab_name)
+        values      = gs_retry(ws_existing.get_all_values)
+        if values and len(values) > 1:
+            return  # Already built
+    except WorksheetNotFound:
+        pass  # Tab doesn't exist yet — build it
+
+    build_weekly_summary(service_date_str, service_labels)
+
 
 
 # ─────────────────────────────────────────────────────────────
