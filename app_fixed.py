@@ -1,16 +1,14 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# Window logic (no Deadlines sheet needed):
-#   Opens : Monday 05:00 SAST
-#   Closes: Saturday 23:00 SAST
-#   Target service date: the Sunday of that same week
+# Window:  Monday 05:00 SAST  →  Saturday 23:00 SAST
+# Target:  Sunday of that same week
 #
-# SHEET TABS REQUIRED:
-#   "uKids Kids SB"            : Family Code | Name & Surname | Age
-#   "Kids & Guys ServiceDates" : service_date | date | label | is_service_day
-#   "uKids Kids responses"     : timestamp | Service date | Family Code | Name | Age | <service cols>
-#   "Final Kids serving dates" : timestamp | Service date | Service | Name | Age
+# Sheet tabs managed automatically:
+#   "uKids Kids SB"            — master child list (Family Code | Name & Surname | Age)
+#   "Kids & Guys ServiceDates" — service date config (service_date | date | label | is_service_day)
+#   "22 Jun 2026" (etc.)       — one tab per week, auto-created; upsert per child (latest wins)
+#   "Final Schedule"           — auto-rebuilt from weekly tab after every submission
 
 import re
 import time
@@ -39,12 +37,11 @@ except Exception:
 # ─────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────
-TZ_NAME       = "Africa/Johannesburg"
-TAB_SB        = "uKids Kids SB"
-TAB_DATES     = "Kids & Guys ServiceDates"
-TAB_RESPONSES = "uKids Kids responses"
-TAB_FINAL     = "Final Kids serving dates"
-MAX_KIDS      = 5
+TZ_NAME   = "Africa/Johannesburg"
+TAB_SB    = "uKids Kids SB"
+TAB_DATES = "Kids & Guys ServiceDates"
+TAB_FINAL = "Final Schedule"
+MAX_KIDS  = 5
 
 TEAL   = "#5BC4C0"
 ORANGE = "#E8724A"
@@ -56,8 +53,17 @@ DARK   = "#2A2A2A"
 MUTED  = "#7A6F6F"
 
 
+def weekly_tab_name(service_date_str: str) -> str:
+    """'2026-06-22'  ->  '22 Jun 2026'"""
+    try:
+        dt = datetime.strptime(service_date_str, "%Y-%m-%d")
+        return f"{dt.day} {dt.strftime('%b %Y')}"
+    except Exception:
+        return service_date_str
+
+
 # ─────────────────────────────────────────────────────────────
-# Page config & CSS  (rendered once, before any data loading)
+# Page config & CSS
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="uKids Availability", layout="centered")
 
@@ -66,41 +72,37 @@ st.markdown(f"""
   @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
   html, body, [class*="css"] {{ font-family: 'Nunito', sans-serif; }}
   :root {{
-    --teal:   {TEAL}; --orange: {ORANGE}; --purple: {PURPLE};
-    --yellow: {YELLOW}; --cream: {CREAM}; --white: {WHITE};
-    --dark:   {DARK};  --muted: {MUTED};
+    --teal:{TEAL}; --orange:{ORANGE}; --purple:{PURPLE};
+    --yellow:{YELLOW}; --cream:{CREAM}; --white:{WHITE};
+    --dark:{DARK}; --muted:{MUTED};
   }}
-  .stApp {{ background: var(--cream); }}
-  section[data-testid="stSidebar"] {{ display: none; }}
+  .stApp {{ background:var(--cream); }}
+  section[data-testid="stSidebar"] {{ display:none; }}
 
   .ukids-hero {{
-    background: var(--teal); border-radius: 20px;
-    padding: 34px 28px 28px; margin-bottom: 28px;
-    text-align: center; position: relative; overflow: hidden;
+    background:var(--teal); border-radius:20px;
+    padding:34px 28px 28px; margin-bottom:28px;
+    text-align:center; position:relative; overflow:hidden;
   }}
   .ukids-hero::before {{
     content:''; position:absolute; top:-40px; right:-40px;
-    width:160px; height:160px;
-    background:var(--orange); border-radius:50%; opacity:0.28;
+    width:160px; height:160px; background:var(--orange); border-radius:50%; opacity:0.28;
   }}
   .ukids-hero::after {{
     content:''; position:absolute; bottom:-30px; left:-30px;
-    width:110px; height:110px;
-    background:var(--purple); border-radius:50%; opacity:0.22;
+    width:110px; height:110px; background:var(--purple); border-radius:50%; opacity:0.22;
   }}
   .ukids-hero-content {{ position:relative; z-index:2; }}
   .ukids-hero h1 {{
     font-size:2rem; font-weight:900; color:var(--white);
-    margin:0 0 6px; letter-spacing:-0.5px;
-    text-shadow:0 2px 8px rgba(0,0,0,0.15);
+    margin:0 0 6px; letter-spacing:-0.5px; text-shadow:0 2px 8px rgba(0,0,0,0.15);
   }}
   .ukids-hero p {{ font-size:1rem; color:var(--white); opacity:0.93; margin:0; }}
 
   .ukids-card {{
     background:var(--white); border-radius:14px;
     padding:20px 20px 16px; margin-bottom:16px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.06);
-    border-top:4px solid var(--teal);
+    box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid var(--teal);
   }}
   .ukids-card-orange {{ border-top-color:var(--orange); }}
   .ukids-card-purple {{ border-top-color:var(--purple); }}
@@ -112,16 +114,14 @@ st.markdown(f"""
   .info-banner {{
     background:linear-gradient(135deg, var(--purple) 0%, #9B6FC6 100%);
     border-radius:12px; padding:14px 18px;
-    font-size:0.88rem; color:var(--white);
-    margin-bottom:16px; line-height:1.75;
+    font-size:0.88rem; color:var(--white); margin-bottom:16px; line-height:1.75;
   }}
   .info-banner strong {{ font-weight:800; }}
 
   .closed-banner {{
     background:linear-gradient(135deg, var(--purple) 0%, #9B6FC6 100%);
-    border-radius:12px; padding:16px 18px;
-    font-size:0.95rem; color:var(--white);
-    margin-bottom:16px; line-height:1.7; text-align:center;
+    border-radius:12px; padding:16px 18px; font-size:0.95rem;
+    color:var(--white); margin-bottom:16px; line-height:1.7; text-align:center;
   }}
 
   .kid-block {{
@@ -144,8 +144,7 @@ st.markdown(f"""
 
   .sticky-submit {{
     position:sticky; bottom:0; z-index:999;
-    background:var(--cream); padding:10px 0 4px;
-    border-top:2px solid #EDE8DC;
+    background:var(--cream); padding:10px 0 4px; border-top:2px solid #EDE8DC;
   }}
 
   .stButton > button {{
@@ -219,7 +218,7 @@ if not is_sheets_enabled():
 
 
 # ─────────────────────────────────────────────────────────────
-# Google Sheets connection  (cached for the whole server process)
+# Google Sheets connection
 # ─────────────────────────────────────────────────────────────
 def gs_retry(func, *args, **kwargs):
     for attempt in range(6):
@@ -289,20 +288,113 @@ def ws_ensure_header(ws, desired_header: list) -> list:
     return header
 
 
-def append_multiple_rows(sheet_title: str, desired_header: list, row_maps: list):
-    sh     = get_spreadsheet()
-    ws     = ensure_worksheet(sh, sheet_title, rows=12000, cols=max(100, len(desired_header) + 10))
-    header = ws_ensure_header(ws, desired_header)
-    values = [[row.get(col, "") for col in header] for row in row_maps]
-    if values:
-        gs_retry(ws.append_rows, values)
+# ─────────────────────────────────────────────────────────────
+# Weekly tab upsert
+# ─────────────────────────────────────────────────────────────
+BASE_COLS = ["timestamp", "Service date", "Family Code", "Name", "Age"]
+
+def upsert_weekly_tab(service_date_str: str, rows_to_write: list, service_labels: list):
+    """
+    Write rows to the weekly tab (e.g. '22 Jun 2026').
+    - Tab is created automatically if it doesn't exist.
+    - Each child is upserted by Name: existing row replaced, new child appended.
+    - After writing, rebuilds 'Final Schedule' automatically.
+    """
+    sh       = get_spreadsheet()
+    tab_name = weekly_tab_name(service_date_str)
+    ws       = ensure_worksheet(sh, tab_name, rows=2000, cols=len(BASE_COLS) + len(service_labels) + 5)
+
+    desired_header = BASE_COLS + service_labels
+    current_header = gs_retry(ws.row_values, 1)
+
+    # If tab is brand new, write header and append all rows
+    if not current_header:
+        gs_retry(ws.update, "1:1", [desired_header])
+        rows_as_lists = [[r.get(c, "") for c in desired_header] for r in rows_to_write]
+        gs_retry(ws.append_rows, rows_as_lists)
+        _rebuild_final_schedule(sh, ws, desired_header, service_labels)
+        return
+
+    # Tab already exists — read current data, upsert by Name
+    _, _, df = ws_get_values_and_df(ws)
+
+    # Ensure any new service columns exist in the header
+    missing = [c for c in desired_header if c not in df.columns]
+    if missing:
+        for col in missing:
+            df[col] = ""
+        # Rewrite header row with new columns
+        full_header = list(df.columns)
+        gs_retry(ws.update, "1:1", [full_header])
+        desired_header = full_header
+
+    # Build a dict of existing rows keyed by Name for quick lookup
+    # We'll track which sheet row number each name occupies (1-indexed, +1 for header)
+    name_to_row_idx: dict = {}
+    for i, row in df.iterrows():
+        name = str(row.get("Name", "")).strip().lower()
+        if name:
+            name_to_row_idx[name] = i + 2  # +1 for 0-index, +1 for header row
+
+    rows_to_append = []
+
+    for new_row in rows_to_write:
+        child_name = str(new_row.get("Name", "")).strip().lower()
+        row_values = [new_row.get(c, "") for c in desired_header]
+
+        if child_name in name_to_row_idx:
+            # Replace existing row in-place
+            sheet_row = name_to_row_idx[child_name]
+            cell_range = f"A{sheet_row}"
+            gs_retry(ws.update, cell_range, [row_values])
+        else:
+            # New child — queue for append
+            rows_to_append.append(row_values)
+
+    if rows_to_append:
+        gs_retry(ws.append_rows, rows_to_append)
+
+    # Rebuild Final Schedule from the now-updated weekly tab
+    _, _, updated_df = ws_get_values_and_df(ws)
+    _rebuild_final_schedule(sh, ws, desired_header, service_labels, updated_df)
+
+
+def _rebuild_final_schedule(sh, weekly_ws, header: list, service_labels: list, df: pd.DataFrame = None):
+    """
+    Rebuilds 'Final Schedule' from the weekly tab.
+    Format: timestamp | Service date | Service | Name | Age
+    One row per child per service they said Yes to.
+    """
+    ws_final     = ensure_worksheet(sh, TAB_FINAL, rows=5000, cols=10)
+    final_header = ["timestamp", "Service date", "Service", "Name", "Age"]
+
+    if df is None:
+        _, _, df = ws_get_values_and_df(weekly_ws)
+
+    ws_final.clear()
+    gs_retry(ws_final.update, "A1", [final_header])
+
+    if df.empty:
+        return
+
+    rows_out = []
+    for _, row in df.iterrows():
+        for svc in service_labels:
+            if str(row.get(svc, "")).strip().lower() == "yes":
+                rows_out.append([
+                    row.get("timestamp", ""),
+                    row.get("Service date", ""),
+                    svc,
+                    row.get("Name", ""),
+                    row.get("Age", ""),
+                ])
+
+    if rows_out:
+        gs_retry(ws_final.append_rows, rows_out)
 
 
 # ─────────────────────────────────────────────────────────────
-# DATA LOADING — one function, stored in session_state
-# All reads happen here. The rest of the app only touches
-# st.session_state["sb_df"] and st.session_state["service_dates_df"]
-# so there are zero mid-render Sheets calls.
+# Data loading — session_state based, fetch once per session
 # ─────────────────────────────────────────────────────────────
 def _raw_fetch_sb() -> pd.DataFrame:
     sh = get_spreadsheet()
@@ -326,21 +418,14 @@ def _raw_fetch_service_dates() -> pd.DataFrame:
 
 
 def load_all_data(force: bool = False):
-    """
-    Load sb_df and service_dates_df into session_state exactly once per
-    session (or when force=True after a registration write).
-    Returns (ok: bool, error_msg: str).
-    """
     if not force and st.session_state.get("data_loaded"):
         return True, ""
-
     try:
         sb        = _raw_fetch_sb()
         svc_dates = _raw_fetch_service_dates()
     except Exception as e:
         return False, str(e)
 
-    # Validate required columns
     for needed, tab, df in [
         ({"service_date", "date", "label", "is_service_day"}, TAB_DATES, svc_dates),
         ({"Family Code", "Name & Surname", "Age"},            TAB_SB,    sb),
@@ -369,7 +454,7 @@ def get_window():
     days_since_monday = now.weekday()
     monday            = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
     opening_dt        = monday.replace(hour=5,  minute=0, second=0, microsecond=0)
-    deadline_dt       = monday.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=5)  # Saturday
+    deadline_dt       = monday.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=5)
     sunday_dt         = monday + timedelta(days=6)
     service_date_str  = sunday_dt.strftime("%Y-%m-%d")
     is_open           = opening_dt <= now < deadline_dt
@@ -470,93 +555,20 @@ def register_children_batch(children: list, family_code: str):
     if rows_to_add:
         gs_retry(ws.append_rows, rows_to_add)
 
-    # Force a fresh load on the next render
     st.session_state["data_loaded"] = False
     return len(rows_to_add), skipped
 
 
-# ─────────────────────────────────────────────────────────────
-# Admin panel
-# ─────────────────────────────────────────────────────────────
-def rebuild_final_schedule():
-    sh       = get_spreadsheet()
-    ws_raw   = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=300)
-    ws_final = ensure_worksheet(sh, TAB_FINAL,     rows=12000, cols=20)
-    _, _, df = ws_get_values_and_df(ws_raw)
-    header_final = ["timestamp", "Service date", "Service", "Name", "Age"]
-    if df.empty:
-        ws_final.clear()
-        gs_retry(ws_final.update, "A1", [header_final])
-        return 0
-    base_cols    = ["timestamp", "Service date", "Family Code", "Name", "Age"]
-    service_cols = [c for c in df.columns if c not in base_cols]
-    rows_out     = []
-    for _, row in df.iterrows():
-        for service in service_cols:
-            if str(row.get(service, "")).strip().lower() == "yes":
-                rows_out.append([
-                    row.get("timestamp", ""), row.get("Service date", ""),
-                    service, row.get("Name", ""), row.get("Age", ""),
-                ])
-    ws_final.clear()
-    gs_retry(ws_final.update, "A1", [header_final])
-    if rows_out:
-        gs_retry(ws_final.append_rows, rows_out)
-    return len(rows_out)
-
-
-def _fetch_responses_df():
-    sh = get_spreadsheet()
-    ws = ensure_worksheet(sh, TAB_RESPONSES, rows=12000, cols=300)
-    _, _, df = ws_get_values_and_df(ws)
-    return df
-
-
-def show_admin_panel():
-    with st.expander("Admin"):
-        if not ADMIN_KEY:
-            st.info("Admin key not set — open to anyone with the link.")
-            unlocked = True
-        else:
-            key      = st.text_input("Enter admin key", type="password")
-            unlocked = key == ADMIN_KEY
-            if key and not unlocked:
-                st.error("Incorrect admin key.")
-            elif unlocked:
-                st.success("Admin unlocked.")
-
-        if unlocked:
-            if st.button("Rebuild Final Kids Schedule"):
-                try:
-                    count = rebuild_final_schedule()
-                    st.success(f"Rebuilt. Rows written: {count}")
-                except Exception as e:
-                    st.error(f"Rebuild failed: {e}")
-
-            if st.button("Preview raw submissions count"):
-                try:
-                    rdf = _fetch_responses_df()
-                    st.write(f"Raw rows: **{len(rdf)}**")
-                except Exception as e:
-                    st.error(f"Could not load: {e}")
-
-            if st.button("Force refresh data"):
-                st.session_state["data_loaded"] = False
-                st.rerun()
-
-
 # ═════════════════════════════════════════════════════════════
-# LOAD DATA — single upfront load with a clear spinner
+# LOAD DATA
 # ═════════════════════════════════════════════════════════════
 with st.spinner("Loading..."):
     ok, err = load_all_data()
 
 if not ok:
     st.error(f"Could not load data from Google Sheets: {err}")
-    show_admin_panel()
     st.stop()
 
-# All subsequent code reads from session_state — no more Sheets calls during rendering
 sb_df            = st.session_state["sb_df"]
 service_dates_df = st.session_state["service_dates_df"]
 
@@ -570,7 +582,7 @@ remaining_seconds = (deadline_dt - now_sast).total_seconds() if is_open else 0
 if is_open:
     st.markdown(f"""
 <div class="info-banner">
-  Submitting availability for <strong>{service_date_key}</strong> (Sunday service)<br>
+  Submitting availability for <strong>{weekly_tab_name(service_date_key)}</strong> (Sunday service)<br>
   Form open from <strong>{opening_dt.strftime('%A %d %b, %H:%M')}</strong>
   until <strong>{deadline_dt.strftime('%A %d %b, %H:%M')}</strong> SAST<br>
   Time remaining: <strong>{format_time_remaining(remaining_seconds)}</strong>
@@ -581,7 +593,6 @@ if is_open:
     if st.button("Refresh timer"):
         st.rerun()
 
-    # Get service dates for this Sunday from the already-loaded dataframe
     week_dates = service_dates_df[
         (service_dates_df["service_date"] == service_date_key)
         & (service_dates_df["is_service_day"].map(_is_truthy))
@@ -597,7 +608,6 @@ if is_open:
         week_dates          = week_dates.sort_values("_sort").drop(columns=["_sort"])
         date_labels         = week_dates["label"].astype(str).tolist()
 
-        # Build child name list from session_state data (no fetch)
         child_names = sorted({
             n for n in sb_df["Name & Surname"].tolist()
             if n and str(n).strip().lower() not in ("", "nan")
@@ -648,14 +658,14 @@ if is_open:
                     st.markdown(f"""
 <div class="ukids-card ukids-card-purple">
   <span class="section-pill">Step 2</span>
-  <h3>Select services — {service_date_key}</h3>
+  <h3>Select services — {weekly_tab_name(service_date_key)}</h3>
 </div>
 """, unsafe_allow_html=True)
 
                     kids_selected_map: dict = {}
 
                     for k in kids_info:
-                        slot  = k["slot"]
+                        slot   = k["slot"]
                         k_name = k["name"]
                         k_age  = age_display(k["age"])
 
@@ -688,12 +698,11 @@ if is_open:
                         if not is_still_open:
                             st.error("The form has just closed. Submissions are no longer accepted.")
                         else:
-                            now_iso        = datetime.utcnow().isoformat() + "Z"
-                            desired_header = ["timestamp", "Service date", "Family Code", "Name", "Age"] + date_labels
-                            rows_to_write  = []
+                            now_iso       = datetime.utcnow().isoformat() + "Z"
+                            rows_to_write = []
 
                             for k in kids_info:
-                                slot = k["slot"]
+                                slot    = k["slot"]
                                 row_map = {
                                     "timestamp":    now_iso,
                                     "Service date": service_date_key,
@@ -707,9 +716,13 @@ if is_open:
 
                             try:
                                 with st.spinner("Saving..."):
-                                    append_multiple_rows(TAB_RESPONSES, desired_header, rows_to_write)
+                                    upsert_weekly_tab(service_date_key, rows_to_write, date_labels)
                                 n = len(rows_to_write)
-                                st.success(f"Submitted. Availability saved for {n} child{'ren' if n != 1 else ''}.")
+                                st.success(
+                                    f"Submitted. Availability saved for "
+                                    f"{n} child{'ren' if n != 1 else ''}. "
+                                    f"Sheet '{weekly_tab_name(service_date_key)}' updated."
+                                )
                                 st.balloons()
                             except Exception as e:
                                 st.error(f"Failed to save: {e}")
@@ -718,8 +731,8 @@ else:
     now  = get_now_sast()
     wday = now.weekday()
     days_to_next_monday = (7 - wday) % 7 or 7
-    next_monday  = (now + timedelta(days=days_to_next_monday)).replace(hour=5,  minute=0, second=0, microsecond=0)
-    next_sunday  = next_monday + timedelta(days=6)
+    next_monday   = (now + timedelta(days=days_to_next_monday)).replace(hour=5, minute=0, second=0, microsecond=0)
+    next_sunday   = next_monday + timedelta(days=6)
     next_deadline = next_monday + timedelta(days=5, hours=18)
 
     st.markdown(f"""
@@ -733,7 +746,7 @@ else:
 
 
 # ═════════════════════════════════════════════════════════════
-# SECTION 2 — FAMILY REGISTRATION (always visible, at the bottom)
+# SECTION 2 — FAMILY REGISTRATION
 # ═════════════════════════════════════════════════════════════
 st.markdown("---")
 st.markdown("""
@@ -840,7 +853,6 @@ with st.expander("Open registration form", expanded=False):
             try:
                 with st.spinner("Registering..."):
                     written, skipped = register_children_batch(valid_children, resolved_fam_code)
-                    # Reload data immediately so new children appear in the dropdown
                     load_all_data(force=True)
                     sb_df = st.session_state["sb_df"]
 
@@ -864,6 +876,3 @@ with st.expander("Open registration form", expanded=False):
                     )
             except Exception as e:
                 st.error(f"Registration failed: {e}")
-
-
-show_admin_panel()
