@@ -454,7 +454,7 @@ def get_window():
     days_since_monday = now.weekday()
     monday            = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
     opening_dt        = monday.replace(hour=5,  minute=0, second=0, microsecond=0)
-    deadline_dt       = monday.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=5)
+    deadline_dt       = monday.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=2)  # Wednesday 14:00
     sunday_dt         = monday + timedelta(days=6)
     service_date_str  = sunday_dt.strftime("%Y-%m-%d")
     is_open           = opening_dt <= now < deadline_dt
@@ -733,7 +733,7 @@ else:
     days_to_next_monday = (7 - wday) % 7 or 7
     next_monday   = (now + timedelta(days=days_to_next_monday)).replace(hour=5, minute=0, second=0, microsecond=0)
     next_sunday   = next_monday + timedelta(days=6)
-    next_deadline = next_monday + timedelta(days=5, hours=18)
+    next_deadline = next_monday + timedelta(days=2, hours=9)  # Wednesday 14:00
 
     st.markdown(f"""
 <div class="closed-banner">
