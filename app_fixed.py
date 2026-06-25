@@ -1,14 +1,14 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# Window: Monday 05:00 SAST → Wednesday 14:00 SAST
-# Target: Sunday of that same week
+# Window:  Monday 05:00 SAST  →  Saturday 23:00 SAST
+# Target:  Sunday of that same week
 #
 # Sheet tabs managed automatically:
 #   "uKids Kids SB"            — master child list (Family Code | Name & Surname | Age)
 #   "Kids & Guys ServiceDates" — service date config (service_date | date | label | is_service_day)
-#   "Master Log"               — every submission is saved here
-#   "22 Jun 2026" etc.         — one tab per week, rebuilt from Master Log after every submission
+#   "22 Jun 2026" (etc.)       — one tab per week, auto-created; upsert per child (latest wins)
+#   "Final Schedule"           — auto-rebuilt from weekly tab after every submission
 
 import re
 import time
@@ -28,10 +28,8 @@ try:
     from gspread.exceptions import APIError, WorksheetNotFound
 except Exception:
     gspread = None
-
     class APIError(Exception):
         pass
-
     class WorksheetNotFound(Exception):
         pass
 
@@ -39,29 +37,24 @@ except Exception:
 # ─────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────
-TZ_NAME = "Africa/Johannesburg"
-
-TAB_SB = "uKids Kids SB"
+TZ_NAME   = "Africa/Johannesburg"
+TAB_SB    = "uKids Kids SB"
 TAB_DATES = "Kids & Guys ServiceDates"
-TAB_MASTER = "Master Log"
+TAB_FINAL = "Final Schedule"
+MAX_KIDS  = 5
 
-MAX_KIDS = 5
-
-TEAL = "#5BC4C0"
+TEAL   = "#5BC4C0"
 ORANGE = "#E8724A"
 PURPLE = "#7B4FA6"
 YELLOW = "#F5C842"
-CREAM = "#FAF6EE"
-WHITE = "#FFFFFF"
-DARK = "#2A2A2A"
-MUTED = "#7A6F6F"
-
-BASE_COLS = ["timestamp", "Service date", "Family Code", "Name", "Age"]
-FLAT_COLS = ["timestamp", "Service date", "Service", "Name", "Age"]
+CREAM  = "#FAF6EE"
+WHITE  = "#FFFFFF"
+DARK   = "#2A2A2A"
+MUTED  = "#7A6F6F"
 
 
 def weekly_tab_name(service_date_str: str) -> str:
-    """'2026-06-22' -> '22 Jun 2026'"""
+    """'2026-06-22'  ->  '22 Jun 2026'"""
     try:
         dt = datetime.strptime(service_date_str, "%Y-%m-%d")
         return f"{dt.day} {dt.strftime('%b %Y')}"
@@ -194,7 +187,6 @@ def _get_secret_any(*paths):
         cur = st.secrets
     except Exception:
         return None
-
     for path in paths:
         c, ok = cur, True
         for k in path:
@@ -214,7 +206,6 @@ ADMIN_KEY = str(_get_secret_any(["ADMIN_KEY"], ["general", "ADMIN_KEY"]) or "")
 def is_sheets_enabled() -> bool:
     if gspread is None:
         return False
-
     return bool(
         _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
         and _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
@@ -243,21 +234,17 @@ def gs_retry(func, *args, **kwargs):
 
 @st.cache_resource
 def get_spreadsheet():
-    sa = _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
+    sa       = _get_secret_any(["gcp_service_account"], ["general", "gcp_service_account"])
     sheet_id = _get_secret_any(["GSHEET_ID"], ["general", "GSHEET_ID"])
-
     if not sa or not sheet_id:
         raise RuntimeError("Missing GSHEET_ID or gcp_service_account in secrets.")
-
     sa = dict(sa)
     pk = sa.get("private_key", "")
-
     if isinstance(pk, str):
         pk = pk.replace("\\n", "\n").strip()
         if not pk.endswith("\n"):
             pk += "\n"
         sa["private_key"] = pk
-
     gc = gspread.service_account_from_dict(sa)
     return gs_retry(gc.open_by_key, sheet_id)
 
@@ -270,112 +257,96 @@ def ensure_worksheet(sh, title: str, rows: int = 2000, cols: int = 50):
 
 
 def make_unique_headers(header: list) -> list:
-    counts = {}
+    counts: dict = {}
     out = []
-
     for h in header:
         base = str(h).strip() or "Unnamed"
         counts[base] = counts.get(base, 0) + 1
         out.append(base if counts[base] == 1 else f"{base}_{counts[base]}")
-
     return out
 
 
 def ws_get_values_and_df(ws):
     values = gs_retry(ws.get_all_values)
-
     if not values:
         return [], [], pd.DataFrame()
-
-    header_raw = values[0]
+    header_raw    = values[0]
     header_unique = make_unique_headers(header_raw)
-    rows = values[1:]
-
+    rows          = values[1:]
     return header_raw, header_unique, pd.DataFrame(rows, columns=header_unique)
 
 
 def ws_ensure_header(ws, desired_header: list) -> list:
     header = gs_retry(ws.row_values, 1)
-
     if not header:
-        gs_retry(ws.update, "A1", [desired_header])
+        gs_retry(ws.update, "1:1", [desired_header])
         return desired_header
-
     missing = [c for c in desired_header if c not in header]
-
     if missing:
         header = header + missing
-        gs_retry(ws.update, "A1", [header])
-
+        gs_retry(ws.update, "1:1", [header])
     return header
 
 
+
+
 # ─────────────────────────────────────────────────────────────
-# Sheet writing — Master Log + weekly summary
+# Sheet writing — Master Log + auto weekly summary
 # ─────────────────────────────────────────────────────────────
+TAB_MASTER = "Master Log"
+BASE_COLS  = ["timestamp", "Service date", "Family Code", "Name", "Age"]
+FLAT_COLS  = ["timestamp", "Service date", "Service", "Name", "Age"]
+
+
 def append_to_master_log(rows_to_write: list, service_labels: list):
     """
     Appends every submission raw to 'Master Log'.
-
-    Columns:
-    timestamp | Service date | Family Code | Name | Age | service labels...
-
-    Every submit = new rows.
-    Nothing is overwritten here.
+    Columns: timestamp | Service date | Family Code | Name | Age | <service labels>
+    Every submit = new rows, nothing is ever overwritten here.
     """
-    sh = get_spreadsheet()
+    sh             = get_spreadsheet()
     desired_header = BASE_COLS + service_labels
-
-    ws = ensure_worksheet(
-        sh,
-        TAB_MASTER,
-        rows=20000,
-        cols=len(desired_header) + 5,
-    )
-
+    ws             = ensure_worksheet(sh, TAB_MASTER, rows=20000, cols=len(desired_header) + 5)
     ws_ensure_header(ws, desired_header)
-
-    rows_as_lists = [[r.get(c, "") for c in desired_header] for r in rows_to_write]
-
-    if rows_as_lists:
-        gs_retry(ws.append_rows, rows_as_lists)
+    rows_as_lists  = [[r.get(c, "") for c in desired_header] for r in rows_to_write]
+    gs_retry(ws.append_rows, rows_as_lists)
 
 
-def build_weekly_summary(service_date_str: str, service_labels: list):
+def build_weekly_summary(service_date_str: str):
     """
-    Reads Master Log, filters to this week, keeps only the latest submission
-    per child, flattens to one row per child per Yes service, and writes to
-    a tab named e.g. '22 Jun 2026'.
+    Reads Master Log, filters to this week, keeps only the LATEST
+    submission per child (by timestamp), flattens to one row per child
+    per Yes service, and writes to a tab named e.g. '22 Jun 2026'.
+    Format: timestamp | Service date | Service | Name | Age
 
-    Format:
-    timestamp | Service date | Service | Name | Age
+    Service labels are derived directly from the Master Log columns
+    so this function needs no external inputs beyond the date.
     """
-    sh = get_spreadsheet()
+    sh       = get_spreadsheet()
     tab_name = weekly_tab_name(service_date_str)
 
     ws_master = ensure_worksheet(sh, TAB_MASTER, rows=20000, cols=100)
-    _, _, df = ws_get_values_and_df(ws_master)
+    _, _, df  = ws_get_values_and_df(ws_master)
 
     if df.empty or "Service date" not in df.columns:
         return
 
-    week_df = df[df["Service date"].astype(str).str.strip() == service_date_str].copy()
-
+    # Filter to this week only
+    week_df = df[df["Service date"].str.strip() == service_date_str].copy()
     if week_df.empty:
-        ws_week = ensure_worksheet(sh, tab_name, rows=2000, cols=10)
-        ws_week.clear()
-        gs_retry(ws_week.update, "A1", [FLAT_COLS])
         return
 
+    # Derive service label columns from the Master Log header
+    # (everything that isn't a base column)
+    service_labels = [c for c in week_df.columns if c not in BASE_COLS]
+
+    # Keep only the latest submission per child
     if "timestamp" in week_df.columns:
         week_df = week_df.sort_values("timestamp")
-
-    # Latest submission per child.
-    # If the same child is submitted multiple times, the last one wins.
     week_df = week_df.drop_duplicates(subset=["Name"], keep="last")
 
+    # Flatten to one row per child per Yes service
     rows_out = []
-
     for _, row in week_df.iterrows():
         for svc in service_labels:
             if str(row.get(svc, "")).strip().lower() == "yes":
@@ -390,45 +361,41 @@ def build_weekly_summary(service_date_str: str, service_labels: list):
     ws_week = ensure_worksheet(sh, tab_name, rows=2000, cols=10)
     ws_week.clear()
     gs_retry(ws_week.update, "A1", [FLAT_COLS])
-
     if rows_out:
         gs_retry(ws_week.append_rows, rows_out)
 
 
-def maybe_build_weekly_summary(service_date_str: str, service_labels: list):
+def maybe_build_weekly_summary(service_date_str: str):
     """
-    If the form is closed, make sure the weekly summary exists.
-    Safe to call repeatedly.
+    Called on every page load when the window is closed.
+    Checks if the weekly summary tab exists and has data —
+    builds it automatically if not. Safe to call repeatedly.
     """
-    is_open, _, _, _, _ = get_window()
-
-    if is_open:
-        return
-
-    sh = get_spreadsheet()
+    sh       = get_spreadsheet()
     tab_name = weekly_tab_name(service_date_str)
 
     try:
         ws_existing = sh.worksheet(tab_name)
-        values = gs_retry(ws_existing.get_all_values)
-
+        values      = gs_retry(ws_existing.get_all_values)
         if values and len(values) > 1:
-            return
-
+            return  # Already built, nothing to do
     except WorksheetNotFound:
-        pass
+        pass  # Tab doesn't exist yet — build it
 
-    build_weekly_summary(service_date_str, service_labels)
+    build_weekly_summary(service_date_str)
+
 
 
 # ─────────────────────────────────────────────────────────────
-# Data loading — session_state based
+# Data loading — session_state based, fetch once per session
 # ─────────────────────────────────────────────────────────────
 def _raw_fetch_sb() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
     _, _, df = ws_get_values_and_df(ws)
-
+    df["Family Code"]    = df["Family Code"].astype(str).str.strip()
+    df["Name & Surname"] = df["Name & Surname"].astype(str).str.strip()
+    df["Age"]            = df["Age"].astype(str).str.strip()
     return df
 
 
@@ -436,54 +403,33 @@ def _raw_fetch_service_dates() -> pd.DataFrame:
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_DATES, rows=4000, cols=20)
     _, _, df = ws_get_values_and_df(ws)
-
+    df["service_date"]   = df["service_date"].astype(str).str.strip()
+    df["date"]           = df["date"].astype(str).str.strip()
+    df["label"]          = df["label"].astype(str).str.strip()
+    df["is_service_day"] = df["is_service_day"].astype(str).str.strip()
     return df
-
-
-def clean_loaded_data(sb: pd.DataFrame, svc_dates: pd.DataFrame):
-    needed_sb = {"Family Code", "Name & Surname", "Age"}
-    needed_dates = {"service_date", "date", "label", "is_service_day"}
-
-    miss_sb = needed_sb - set(sb.columns)
-    miss_dates = needed_dates - set(svc_dates.columns)
-
-    if miss_sb:
-        return False, f"Sheet '{TAB_SB}' missing columns: {', '.join(sorted(miss_sb))}"
-
-    if miss_dates:
-        return False, f"Sheet '{TAB_DATES}' missing columns: {', '.join(sorted(miss_dates))}"
-
-    sb["Family Code"] = sb["Family Code"].astype(str).str.strip()
-    sb["Name & Surname"] = sb["Name & Surname"].astype(str).str.strip()
-    sb["Age"] = sb["Age"].astype(str).str.strip()
-
-    svc_dates["service_date"] = svc_dates["service_date"].astype(str).str.strip()
-    svc_dates["date"] = svc_dates["date"].astype(str).str.strip()
-    svc_dates["label"] = svc_dates["label"].astype(str).str.strip()
-    svc_dates["is_service_day"] = svc_dates["is_service_day"].astype(str).str.strip()
-
-    return True, ""
 
 
 def load_all_data(force: bool = False):
     if not force and st.session_state.get("data_loaded"):
         return True, ""
-
     try:
-        sb = _raw_fetch_sb()
+        sb        = _raw_fetch_sb()
         svc_dates = _raw_fetch_service_dates()
     except Exception as e:
         return False, str(e)
 
-    ok, err = clean_loaded_data(sb, svc_dates)
+    for needed, tab, df in [
+        ({"service_date", "date", "label", "is_service_day"}, TAB_DATES, svc_dates),
+        ({"Family Code", "Name & Surname", "Age"},            TAB_SB,    sb),
+    ]:
+        miss = needed - set(df.columns)
+        if miss:
+            return False, f"Sheet '{tab}' missing columns: {', '.join(sorted(miss))}"
 
-    if not ok:
-        return False, err
-
-    st.session_state["sb_df"] = sb
+    st.session_state["sb_df"]            = sb
     st.session_state["service_dates_df"] = svc_dates
-    st.session_state["data_loaded"] = True
-
+    st.session_state["data_loaded"]      = True
     return True, ""
 
 
@@ -493,34 +439,25 @@ def load_all_data(force: bool = False):
 def get_now_sast() -> datetime:
     if ZoneInfo:
         return datetime.now(ZoneInfo(TZ_NAME))
-
     return datetime.utcnow() + timedelta(hours=2)
 
 
 def get_window():
-    now = get_now_sast()
-
+    now               = get_now_sast()
     days_since_monday = now.weekday()
-    monday = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
-
-    opening_dt = monday.replace(hour=5, minute=0, second=0, microsecond=0)
-
-    # Wednesday 14:00 SAST
-    deadline_dt = monday.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=2)
-
-    sunday_dt = monday + timedelta(days=6)
-    service_date_str = sunday_dt.strftime("%Y-%m-%d")
-
-    is_open = opening_dt <= now < deadline_dt
-
+    monday            = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
+    opening_dt        = monday.replace(hour=5,  minute=0, second=0, microsecond=0)
+    deadline_dt       = monday.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=2)  # Wednesday 14:00
+    sunday_dt         = monday + timedelta(days=6)
+    service_date_str  = sunday_dt.strftime("%Y-%m-%d")
+    is_open           = opening_dt <= now < deadline_dt
     return is_open, service_date_str, opening_dt, deadline_dt, now
 
 
 def format_time_remaining(delta_seconds: float) -> str:
     secs = max(0, int(delta_seconds))
-    hrs = secs // 3600
+    hrs  = secs // 3600
     mins = (secs % 3600) // 60
-
     return f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
 
 
@@ -529,7 +466,7 @@ def format_time_remaining(delta_seconds: float) -> str:
 # ─────────────────────────────────────────────────────────────
 def _clean_cell(x) -> str:
     s = str(x).strip()
-    return "" if s == "" or s.lower() == "nan" else s
+    return "" if (s == "" or s.lower() == "nan") else s
 
 
 def _is_truthy(v) -> bool:
@@ -545,13 +482,10 @@ def _safe_parse_date_ymd(s: str) -> datetime:
 
 def age_display(age_raw: str) -> str:
     age_str = _clean_cell(age_raw)
-
     if not age_str:
         return ""
-
     if "Born" in age_str or "Age" in age_str:
         return age_str
-
     try:
         age_int = int(float(age_str))
         return f"Age {age_int} (Born {datetime.now().year - age_int})"
@@ -561,40 +495,19 @@ def age_display(age_raw: str) -> str:
 
 def age_to_number(age_raw: str) -> str:
     age_str = _clean_cell(age_raw)
-
     if not age_str:
         return ""
-
     if age_str.isdigit():
         return age_str
-
     m = re.search(r"\d+", age_str)
-
     return m.group() if m else age_str
-
-
-def get_week_service_labels(service_dates_df: pd.DataFrame, service_date_key: str):
-    week_dates = service_dates_df[
-        (service_dates_df["service_date"] == service_date_key)
-        & (service_dates_df["is_service_day"].map(_is_truthy))
-    ].copy()
-
-    if week_dates.empty:
-        return week_dates, []
-
-    week_dates["_sort"] = week_dates["date"].map(_safe_parse_date_ymd)
-    week_dates = week_dates.sort_values("_sort").drop(columns=["_sort"])
-
-    date_labels = week_dates["label"].astype(str).tolist()
-
-    return week_dates, date_labels
 
 
 # ─────────────────────────────────────────────────────────────
 # Registration helpers
 # ─────────────────────────────────────────────────────────────
 def is_duplicate_name(name: str, df: pd.DataFrame) -> bool:
-    existing = df["Name & Surname"].astype(str).str.strip().str.lower().tolist()
+    existing = df["Name & Surname"].str.strip().str.lower().tolist()
     return name.strip().lower() in existing
 
 
@@ -604,38 +517,28 @@ def get_next_family_code(df: pd.DataFrame) -> int:
 
 
 def get_family_code_for_sibling(sibling_name: str, df: pd.DataFrame) -> str:
-    rows = df[df["Name & Surname"].astype(str).str.strip() == sibling_name.strip()]
-
+    rows = df[df["Name & Surname"].str.strip() == sibling_name.strip()]
     if rows.empty:
         return ""
-
     return _clean_cell(rows.iloc[0].get("Family Code", ""))
 
 
 def register_children_batch(children: list, family_code: str):
     sh = get_spreadsheet()
     ws = ensure_worksheet(sh, TAB_SB, rows=4000, cols=20)
-
     ws_ensure_header(ws, ["Family Code", "Name & Surname", "Age"])
 
     _, _, latest_df = ws_get_values_and_df(ws)
-
     if "Name & Surname" not in latest_df.columns:
         existing_names = set()
     else:
-        existing_names = set(
-            latest_df["Name & Surname"].astype(str).str.strip().str.lower().tolist()
-        )
+        existing_names = set(latest_df["Name & Surname"].str.strip().str.lower().tolist())
 
-    rows_to_add = []
-    skipped = []
-
+    rows_to_add, skipped = [], []
     for child in children:
         name_clean = child["name"].strip()
-
         if not name_clean:
             continue
-
         if name_clean.lower() in existing_names:
             skipped.append(name_clean)
         else:
@@ -646,7 +549,6 @@ def register_children_batch(children: list, family_code: str):
         gs_retry(ws.append_rows, rows_to_add)
 
     st.session_state["data_loaded"] = False
-
     return len(rows_to_add), skipped
 
 
@@ -660,28 +562,20 @@ if not ok:
     st.error(f"Could not load data from Google Sheets: {err}")
     st.stop()
 
-sb_df = st.session_state["sb_df"]
+sb_df            = st.session_state["sb_df"]
 service_dates_df = st.session_state["service_dates_df"]
-
-is_open, service_date_key, opening_dt, deadline_dt, now_sast = get_window()
-remaining_seconds = (deadline_dt - now_sast).total_seconds() if is_open else 0
-
-week_dates, date_labels = get_week_service_labels(service_dates_df, service_date_key)
-
-if date_labels:
-    try:
-        maybe_build_weekly_summary(service_date_key, date_labels)
-    except Exception:
-        pass
 
 
 # ═════════════════════════════════════════════════════════════
 # SECTION 1 — AVAILABILITY FORM
 # ═════════════════════════════════════════════════════════════
+is_open, service_date_key, opening_dt, deadline_dt, now_sast = get_window()
+remaining_seconds = (deadline_dt - now_sast).total_seconds() if is_open else 0
+
 if is_open:
     st.markdown(f"""
 <div class="info-banner">
-  Submitting availability for <strong>{weekly_tab_name(service_date_key)}</strong> Sunday service<br>
+  Submitting availability for <strong>{weekly_tab_name(service_date_key)}</strong> (Sunday service)<br>
   Form open from <strong>{opening_dt.strftime('%A %d %b, %H:%M')}</strong>
   until <strong>{deadline_dt.strftime('%A %d %b, %H:%M')}</strong> SAST<br>
   Time remaining: <strong>{format_time_remaining(remaining_seconds)}</strong>
@@ -692,15 +586,23 @@ if is_open:
     if st.button("Refresh timer"):
         st.rerun()
 
+    week_dates = service_dates_df[
+        (service_dates_df["service_date"] == service_date_key)
+        & (service_dates_df["is_service_day"].map(_is_truthy))
+    ].copy()
+
     if week_dates.empty:
         st.warning(
             f"No service dates found for **{service_date_key}** in the "
             f"'{TAB_DATES}' sheet. Ask the admin to add them."
         )
-
     else:
+        week_dates["_sort"] = week_dates["date"].map(_safe_parse_date_ymd)
+        week_dates          = week_dates.sort_values("_sort").drop(columns=["_sort"])
+        date_labels         = week_dates["label"].astype(str).tolist()
+
         child_names = sorted({
-            n for n in sb_df["Name & Surname"].astype(str).tolist()
+            n for n in sb_df["Name & Surname"].tolist()
             if n and str(n).strip().lower() not in ("", "nan")
         })
 
@@ -710,19 +612,12 @@ if is_open:
 
         def get_kids_info(family_code: str) -> list:
             rows = sb_df[sb_df["Family Code"] == family_code].copy()
-            out = []
-
+            out  = []
             for idx, row in rows.reset_index(drop=True).iterrows():
                 kid_name = _clean_cell(row.get("Name & Surname", ""))
-                age_val = _clean_cell(row.get("Age", ""))
-
+                age_val  = _clean_cell(row.get("Age", ""))
                 if kid_name:
-                    out.append({
-                        "slot": idx + 1,
-                        "name": kid_name,
-                        "age": age_val,
-                    })
-
+                    out.append({"slot": idx + 1, "name": kid_name, "age": age_val})
             return out
 
         st.markdown("""
@@ -744,13 +639,11 @@ if is_open:
 
         else:
             family_code = get_family_code_for_child(selected_child)
-
             if not family_code:
                 st.error("Could not find a family code for that child.")
 
             else:
                 kids_info = get_kids_info(family_code)
-
                 if not kids_info:
                     st.warning("No children found for this family in the sheet.")
 
@@ -762,12 +655,12 @@ if is_open:
 </div>
 """, unsafe_allow_html=True)
 
-                    kids_selected_map = {}
+                    kids_selected_map: dict = {}
 
                     for k in kids_info:
-                        slot = k["slot"]
+                        slot   = k["slot"]
                         k_name = k["name"]
-                        k_age = age_display(k["age"])
+                        k_age  = age_display(k["age"])
 
                         st.markdown(f"""
 <div class="kid-block">
@@ -775,26 +668,19 @@ if is_open:
   <div class="kid-age">{k_age}</div>
 </div>
 """, unsafe_allow_html=True)
-
                         st.caption("Which services can this child attend?")
 
                         selected_labels = []
-
                         for svc in date_labels:
                             if st.checkbox(svc, key=f"svc_{slot}_{service_date_key}_{svc}"):
                                 selected_labels.append(svc)
-
                         kids_selected_map[slot] = set(selected_labels)
-
                         st.divider()
 
                     st.markdown("**Review**")
-
                     for k in kids_info:
                         count = len(kids_selected_map.get(k["slot"], set()))
-                        st.write(
-                            f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected"
-                        )
+                        st.write(f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected")
 
                     st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
                     submitted = st.button("Submit availability")
@@ -802,64 +688,50 @@ if is_open:
 
                     if submitted:
                         is_still_open, _, _, _, _ = get_window()
-
                         if not is_still_open:
                             st.error("The form has just closed. Submissions are no longer accepted.")
-
                         else:
-                            now_iso = datetime.utcnow().isoformat() + "Z"
+                            now_iso       = datetime.utcnow().isoformat() + "Z"
                             rows_to_write = []
 
                             for k in kids_info:
-                                slot = k["slot"]
-
+                                slot    = k["slot"]
                                 row_map = {
-                                    "timestamp": now_iso,
+                                    "timestamp":    now_iso,
                                     "Service date": service_date_key,
-                                    "Family Code": family_code,
-                                    "Name": k["name"],
-                                    "Age": age_to_number(k["age"]),
+                                    "Family Code":  family_code,
+                                    "Name":         k["name"],
+                                    "Age":          age_to_number(k["age"]),
                                 }
-
                                 for svc in date_labels:
-                                    row_map[svc] = (
-                                        "Yes"
-                                        if svc in kids_selected_map.get(slot, set())
-                                        else "No"
-                                    )
-
+                                    row_map[svc] = "Yes" if svc in kids_selected_map.get(slot, set()) else "No"
                                 rows_to_write.append(row_map)
 
                             try:
                                 with st.spinner("Saving..."):
                                     append_to_master_log(rows_to_write, date_labels)
-                                    build_weekly_summary(service_date_key, date_labels)
-
                                 n = len(rows_to_write)
-
                                 st.success(
                                     f"Submitted. Availability saved for "
-                                    f"{n} child{'ren' if n != 1 else ''}. "
-                                    f"Weekly sheet '{weekly_tab_name(service_date_key)}' updated."
+                                    f"{n} child{'ren' if n != 1 else ''}."
                                 )
-
                                 st.balloons()
-
                             except Exception as e:
                                 st.error(f"Failed to save: {e}")
 
 else:
-    now = get_now_sast()
+    now  = get_now_sast()
     wday = now.weekday()
-
     days_to_next_monday = (7 - wday) % 7 or 7
+    next_monday   = (now + timedelta(days=days_to_next_monday)).replace(hour=5, minute=0, second=0, microsecond=0)
+    next_sunday   = next_monday + timedelta(days=6)
+    next_deadline = next_monday + timedelta(days=2, hours=9)  # Wednesday 14:00
 
-    next_monday = (
-        now + timedelta(days=days_to_next_monday)
-    ).replace(hour=5, minute=0, second=0, microsecond=0)
-
-    next_sunday = next_monday + timedelta(days=6)
-    next_deadline = next_monday.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=2)
+    # Automatically build the weekly summary tab if it hasn't been created yet
+    try:
+        maybe_build_weekly_summary(service_date_key)
+    except Exception:
+        pass  # Never block the UI if this fails
 
     st.markdown(f"""
 <div class="closed-banner">
@@ -875,7 +747,6 @@ else:
 # SECTION 2 — FAMILY REGISTRATION
 # ═════════════════════════════════════════════════════════════
 st.markdown("---")
-
 st.markdown("""
 <div class="ukids-card ukids-card-orange">
   <span class="section-pill">New to uKids serving?</span>
@@ -892,53 +763,36 @@ with st.expander("Open registration form", expanded=False):
 
     num_children = st.number_input(
         "How many children are you registering?",
-        min_value=1,
-        max_value=MAX_KIDS,
-        value=1,
-        step=1,
+        min_value=1, max_value=MAX_KIDS, value=1, step=1,
         key="reg_num_children",
     )
 
     reg_children = []
-
     for i in range(int(num_children)):
         ordinal = ["First", "Second", "Third", "Fourth", "Fifth"][i]
-
         st.markdown(
             f'<div class="child-block"><div class="child-block-label">{ordinal} child</div>',
             unsafe_allow_html=True,
         )
-
         c_name = st.text_input(
             "Full name (Name & Surname)",
             placeholder="e.g. Levi Van der Vyver",
             key=f"reg_child_name_{i}",
         )
-
         c_birth = st.number_input(
             "Birth year",
-            min_value=2000,
-            max_value=datetime.now().year,
-            value=datetime.now().year - 8,
-            step=1,
+            min_value=2000, max_value=datetime.now().year,
+            value=datetime.now().year - 8, step=1,
             key=f"reg_child_birth_{i}",
         )
-
         c_age = str(datetime.now().year - int(c_birth))
-
         if c_name.strip():
             st.caption(f"Will be stored as: **{age_display(c_age)}**")
-
         st.markdown("</div>", unsafe_allow_html=True)
-
-        reg_children.append({
-            "name": c_name.strip(),
-            "age": c_age,
-        })
+        reg_children.append({"name": c_name.strip(), "age": c_age})
 
     st.markdown("---")
     st.markdown("**Is any sibling from your family already on the list?**")
-
     st.caption(
         "If a sibling is already registered, select their name so the new children "
         "are linked to the same family. Otherwise a new family code will be created."
@@ -946,64 +800,45 @@ with st.expander("Open registration form", expanded=False):
 
     link_choice = st.radio(
         "Family link",
-        options=[
-            "Yes — pick an existing sibling",
-            "No — this is a brand-new family",
-        ],
+        options=["Yes — pick an existing sibling", "No — this is a brand-new family"],
         key="reg_link_choice",
         label_visibility="collapsed",
     )
 
     resolved_fam_code = None
-    chosen_sibling = None
+    chosen_sibling    = None
 
     if link_choice == "Yes — pick an existing sibling":
         reg_child_list = sorted({
-            n for n in sb_df["Name & Surname"].astype(str).tolist()
+            n for n in sb_df["Name & Surname"].tolist()
             if n and str(n).strip().lower() not in ("", "nan")
         })
-
         chosen_sibling = st.selectbox(
             "Select an existing sibling",
             options=[""] + reg_child_list,
             key="reg_sibling",
         )
-
         if chosen_sibling:
             resolved_fam_code = get_family_code_for_sibling(chosen_sibling, sb_df)
-
             if resolved_fam_code:
                 st.success(f"New children will be added to Family Code **{resolved_fam_code}**.")
             else:
                 st.error("Could not find a family code for that sibling. Try the 'new family' option.")
-
     else:
         resolved_fam_code = str(get_next_family_code(sb_df))
         st.info(f"A new Family Code **{resolved_fam_code}** will be assigned to your family.")
 
     all_names_filled = all(c["name"] for c in reg_children)
-
     sibling_ok = (
         link_choice != "Yes — pick an existing sibling"
-        or bool(chosen_sibling and resolved_fam_code)
+        or (chosen_sibling and resolved_fam_code)
     )
-
     reg_ready = all_names_filled and sibling_ok and bool(resolved_fam_code)
 
     if st.button("Register family", disabled=not reg_ready, key="btn_register"):
         valid_children = [c for c in reg_children if c["name"]]
-
-        all_dupes = [
-            c["name"]
-            for c in valid_children
-            if is_duplicate_name(c["name"], sb_df)
-        ]
-
-        non_dupes = [
-            c
-            for c in valid_children
-            if not is_duplicate_name(c["name"], sb_df)
-        ]
+        all_dupes = [c["name"] for c in valid_children if is_duplicate_name(c["name"], sb_df)]
+        non_dupes = [c for c in valid_children if not is_duplicate_name(c["name"], sb_df)]
 
         if all_dupes and not non_dupes:
             st.error(
@@ -1012,32 +847,23 @@ with st.expander("Open registration form", expanded=False):
                 "If you believe this is a different child with the same name, "
                 "please contact **Ps Some** to resolve this manually."
             )
-
         else:
             try:
                 with st.spinner("Registering..."):
-                    written, skipped = register_children_batch(
-                        valid_children,
-                        resolved_fam_code,
-                    )
-
+                    written, skipped = register_children_batch(valid_children, resolved_fam_code)
                     load_all_data(force=True)
                     sb_df = st.session_state["sb_df"]
 
                 if written > 0:
                     names_written = [
-                        c["name"]
-                        for c in valid_children
+                        c["name"] for c in valid_children
                         if c["name"].lower() not in [s.lower() for s in skipped]
                     ]
-
                     st.success(
                         f"Registered {written} child{'ren' if written != 1 else ''}: "
-                        f"**{', '.join(names_written)}** "
-                        f"(Family Code {resolved_fam_code}). "
+                        f"**{', '.join(names_written)}** (Family Code {resolved_fam_code}). "
                         "They now appear in the availability form above."
                     )
-
                     st.balloons()
 
                 if skipped:
@@ -1046,6 +872,5 @@ with st.expander("Open registration form", expanded=False):
                         "If you think this is a different child with the same name, "
                         "please contact **Ps Some**."
                     )
-
             except Exception as e:
                 st.error(f"Registration failed: {e}")
