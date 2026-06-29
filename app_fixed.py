@@ -411,8 +411,16 @@ def _raw_fetch_service_dates() -> pd.DataFrame:
 
 
 def load_all_data(force: bool = False):
+    # Get the current week's service date to detect week rollovers
+    _, current_week_key, _, _, _ = get_window()
+
+    # Bust the cache if the week has changed since last load
+    if st.session_state.get("loaded_week_key") != current_week_key:
+        force = True
+
     if not force and st.session_state.get("data_loaded"):
         return True, ""
+
     try:
         sb        = _raw_fetch_sb()
         svc_dates = _raw_fetch_service_dates()
@@ -430,6 +438,7 @@ def load_all_data(force: bool = False):
     st.session_state["sb_df"]            = sb
     st.session_state["service_dates_df"] = svc_dates
     st.session_state["data_loaded"]      = True
+    st.session_state["loaded_week_key"]  = current_week_key
     return True, ""
 
 
