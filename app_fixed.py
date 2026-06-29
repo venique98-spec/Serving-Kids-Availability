@@ -1,14 +1,15 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# Window:  Monday 05:00 SAST  →  Saturday 23:00 SAST
+# Window:  Monday 05:00 SAST  →  Wednesday 14:00 SAST
 # Target:  Sunday of that same week
 #
 # Sheet tabs managed automatically:
-#   "uKids Kids SB"            — master child list (Family Code | Name & Surname | Age)
-#   "Kids & Guys ServiceDates" — service date config (service_date | date | label | is_service_day)
-#   "22 Jun 2026" (etc.)       — one tab per week, auto-created; upsert per child (latest wins)
-#   "Final Schedule"           — auto-rebuilt from weekly tab after every submission
+#   "uKids Kids SB"  — master child list (Family Code | Name & Surname | Age)
+#   "Master Log"     — every submission ever appended (never modified)
+#   "22 Jun 2026"    — auto-created after window closes; latest submission per child, flattened
+#
+# Service columns are always fixed: Morning | Evening  (no ServiceDates sheet needed)
 
 import re
 import time
@@ -38,10 +39,10 @@ except Exception:
 # Constants
 # ─────────────────────────────────────────────────────────────
 TZ_NAME   = "Africa/Johannesburg"
-TAB_SB    = "uKids Kids SB"
-TAB_DATES = "Kids & Guys ServiceDates"
-TAB_FINAL = "Final Schedule"
-MAX_KIDS  = 5
+TAB_SB        = "uKids Kids SB"
+TAB_FINAL     = "Final Schedule"
+MAX_KIDS      = 5
+SERVICE_LABELS = ["Morning", "Evening"]  # fixed service columns — no sheet lookup needed
 
 TEAL   = "#5BC4C0"
 ORANGE = "#E8724A"
@@ -399,46 +400,21 @@ def _raw_fetch_sb() -> pd.DataFrame:
     return df
 
 
-def _raw_fetch_service_dates() -> pd.DataFrame:
-    sh = get_spreadsheet()
-    ws = ensure_worksheet(sh, TAB_DATES, rows=4000, cols=20)
-    _, _, df = ws_get_values_and_df(ws)
-    df["service_date"]   = df["service_date"].astype(str).str.strip()
-    df["date"]           = df["date"].astype(str).str.strip()
-    df["label"]          = df["label"].astype(str).str.strip()
-    df["is_service_day"] = df["is_service_day"].astype(str).str.strip()
-    return df
-
-
 def load_all_data(force: bool = False):
-    # Get the current week's service date to detect week rollovers
-    _, current_week_key, _, _, _ = get_window()
-
-    # Bust the cache if the week has changed since last load
-    if st.session_state.get("loaded_week_key") != current_week_key:
-        force = True
-
     if not force and st.session_state.get("data_loaded"):
         return True, ""
 
     try:
-        sb        = _raw_fetch_sb()
-        svc_dates = _raw_fetch_service_dates()
+        sb = _raw_fetch_sb()
     except Exception as e:
         return False, str(e)
 
-    for needed, tab, df in [
-        ({"service_date", "date", "label", "is_service_day"}, TAB_DATES, svc_dates),
-        ({"Family Code", "Name & Surname", "Age"},            TAB_SB,    sb),
-    ]:
-        miss = needed - set(df.columns)
-        if miss:
-            return False, f"Sheet '{tab}' missing columns: {', '.join(sorted(miss))}"
+    miss = {"Family Code", "Name & Surname", "Age"} - set(sb.columns)
+    if miss:
+        return False, f"Sheet '{TAB_SB}' missing columns: {', '.join(sorted(miss))}"
 
-    st.session_state["sb_df"]            = sb
-    st.session_state["service_dates_df"] = svc_dates
-    st.session_state["data_loaded"]      = True
-    st.session_state["loaded_week_key"]  = current_week_key
+    st.session_state["sb_df"]       = sb
+    st.session_state["data_loaded"] = True
     return True, ""
 
 
@@ -571,8 +547,7 @@ if not ok:
     st.error(f"Could not load data from Google Sheets: {err}")
     st.stop()
 
-sb_df            = st.session_state["sb_df"]
-service_dates_df = st.session_state["service_dates_df"]
+sb_df = st.session_state["sb_df"]
 
 
 # ═════════════════════════════════════════════════════════════
@@ -595,138 +570,125 @@ if is_open:
     if st.button("Refresh timer"):
         st.rerun()
 
-    week_dates = service_dates_df[
-        (service_dates_df["service_date"] == service_date_key)
-        & (service_dates_df["is_service_day"].map(_is_truthy))
-    ].copy()
+    date_labels = SERVICE_LABELS
 
-    if week_dates.empty:
-        st.warning(
-            f"No service dates found for **{service_date_key}** in the "
-            f"'{TAB_DATES}' sheet. Ask the admin to add them."
-        )
-    else:
-        week_dates["_sort"] = week_dates["date"].map(_safe_parse_date_ymd)
-        week_dates          = week_dates.sort_values("_sort").drop(columns=["_sort"])
-        date_labels         = week_dates["label"].astype(str).tolist()
+    child_names = sorted({
+        n for n in sb_df["Name & Surname"].tolist()
+        if n and str(n).strip().lower() not in ("", "nan")
+    })
 
-        child_names = sorted({
-            n for n in sb_df["Name & Surname"].tolist()
-            if n and str(n).strip().lower() not in ("", "nan")
-        })
+    def get_family_code_for_child(name: str) -> str:
+        rows = sb_df[sb_df["Name & Surname"] == name]
+        return _clean_cell(rows.iloc[0].get("Family Code", "")) if not rows.empty else ""
 
-        def get_family_code_for_child(name: str) -> str:
-            rows = sb_df[sb_df["Name & Surname"] == name]
-            return _clean_cell(rows.iloc[0].get("Family Code", "")) if not rows.empty else ""
+    def get_kids_info(family_code: str) -> list:
+        rows = sb_df[sb_df["Family Code"] == family_code].copy()
+        out  = []
+        for idx, row in rows.reset_index(drop=True).iterrows():
+            kid_name = _clean_cell(row.get("Name & Surname", ""))
+            age_val  = _clean_cell(row.get("Age", ""))
+            if kid_name:
+                out.append({"slot": idx + 1, "name": kid_name, "age": age_val})
+        return out
 
-        def get_kids_info(family_code: str) -> list:
-            rows = sb_df[sb_df["Family Code"] == family_code].copy()
-            out  = []
-            for idx, row in rows.reset_index(drop=True).iterrows():
-                kid_name = _clean_cell(row.get("Name & Surname", ""))
-                age_val  = _clean_cell(row.get("Age", ""))
-                if kid_name:
-                    out.append({"slot": idx + 1, "name": kid_name, "age": age_val})
-            return out
-
-        st.markdown("""
+    st.markdown("""
 <div class="ukids-card">
   <span class="section-pill">Step 1</span>
   <h3>Submit your child's availability</h3>
 </div>
 """, unsafe_allow_html=True)
 
-        selected_child = st.selectbox(
-            "Search for one child from your family",
-            options=[""] + child_names,
-            index=0,
-            key="main_child_select",
-        )
+    selected_child = st.selectbox(
+        "Search for one child from your family",
+        options=[""] + child_names,
+        index=0,
+        key="main_child_select",
+    )
 
-        if not selected_child:
-            st.caption("Select one child to load your whole family's form.")
+    if not selected_child:
+        st.caption("Select one child to load your whole family's form.")
+
+    else:
+        family_code = get_family_code_for_child(selected_child)
+        if not family_code:
+            st.error("Could not find a family code for that child.")
 
         else:
-            family_code = get_family_code_for_child(selected_child)
-            if not family_code:
-                st.error("Could not find a family code for that child.")
+            kids_info = get_kids_info(family_code)
+            if not kids_info:
+                st.warning("No children found for this family in the sheet.")
 
             else:
-                kids_info = get_kids_info(family_code)
-                if not kids_info:
-                    st.warning("No children found for this family in the sheet.")
-
-                else:
-                    st.markdown(f"""
+                st.markdown(f"""
 <div class="ukids-card ukids-card-purple">
   <span class="section-pill">Step 2</span>
   <h3>Select services — {weekly_tab_name(service_date_key)}</h3>
 </div>
 """, unsafe_allow_html=True)
 
-                    kids_selected_map: dict = {}
+                kids_selected_map: dict = {}
 
-                    for k in kids_info:
-                        slot   = k["slot"]
-                        k_name = k["name"]
-                        k_age  = age_display(k["age"])
+                for k in kids_info:
+                    slot   = k["slot"]
+                    k_name = k["name"]
+                    k_age  = age_display(k["age"])
 
-                        st.markdown(f"""
+                    st.markdown(f"""
 <div class="kid-block">
   <div class="kid-name">{k_name}</div>
   <div class="kid-age">{k_age}</div>
 </div>
 """, unsafe_allow_html=True)
-                        st.caption("Which services can this child attend?")
+                    st.caption("Which services can this child attend?")
 
-                        selected_labels = []
-                        for svc in date_labels:
-                            if st.checkbox(svc, key=f"svc_{slot}_{service_date_key}_{svc}"):
-                                selected_labels.append(svc)
-                        kids_selected_map[slot] = set(selected_labels)
-                        st.divider()
+                    selected_labels = []
+                    for svc in date_labels:
+                        if st.checkbox(svc, key=f"svc_{slot}_{service_date_key}_{svc}"):
+                            selected_labels.append(svc)
+                    kids_selected_map[slot] = set(selected_labels)
+                    st.divider()
 
-                    st.markdown("**Review**")
-                    for k in kids_info:
-                        count = len(kids_selected_map.get(k["slot"], set()))
-                        st.write(f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected")
+                st.markdown("**Review**")
+                for k in kids_info:
+                    count = len(kids_selected_map.get(k["slot"], set()))
+                    st.write(f"**{k['name']}** — {count} service{'s' if count != 1 else ''} selected")
 
-                    st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
-                    submitted = st.button("Submit availability")
-                    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
+                submitted = st.button("Submit availability")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                    if submitted:
-                        is_still_open, _, _, _, _ = get_window()
-                        if not is_still_open:
-                            st.error("The form has just closed. Submissions are no longer accepted.")
-                        else:
-                            now_iso       = datetime.utcnow().isoformat() + "Z"
-                            rows_to_write = []
+                if submitted:
+                    is_still_open, _, _, _, _ = get_window()
+                    if not is_still_open:
+                        st.error("The form has just closed. Submissions are no longer accepted.")
+                    else:
+                        now_iso       = datetime.utcnow().isoformat() + "Z"
+                        rows_to_write = []
 
-                            for k in kids_info:
-                                slot    = k["slot"]
-                                row_map = {
-                                    "timestamp":    now_iso,
-                                    "Service date": service_date_key,
-                                    "Family Code":  family_code,
-                                    "Name":         k["name"],
-                                    "Age":          age_to_number(k["age"]),
-                                }
-                                for svc in date_labels:
-                                    row_map[svc] = "Yes" if svc in kids_selected_map.get(slot, set()) else "No"
-                                rows_to_write.append(row_map)
+                        for k in kids_info:
+                            slot    = k["slot"]
+                            row_map = {
+                                "timestamp":    now_iso,
+                                "Service date": service_date_key,
+                                "Family Code":  family_code,
+                                "Name":         k["name"],
+                                "Age":          age_to_number(k["age"]),
+                            }
+                            for svc in date_labels:
+                                row_map[svc] = "Yes" if svc in kids_selected_map.get(slot, set()) else "No"
+                            rows_to_write.append(row_map)
 
-                            try:
-                                with st.spinner("Saving..."):
-                                    append_to_master_log(rows_to_write, date_labels)
-                                n = len(rows_to_write)
-                                st.success(
-                                    f"Submitted. Availability saved for "
-                                    f"{n} child{'ren' if n != 1 else ''}."
-                                )
-                                st.balloons()
-                            except Exception as e:
-                                st.error(f"Failed to save: {e}")
+                        try:
+                            with st.spinner("Saving..."):
+                                append_to_master_log(rows_to_write, date_labels)
+                            n = len(rows_to_write)
+                            st.success(
+                                f"Submitted. Availability saved for "
+                                f"{n} child{'ren' if n != 1 else ''}."
+                            )
+                            st.balloons()
+                        except Exception as e:
+                            st.error(f"Failed to save: {e}")
 
 else:
     now  = get_now_sast()
@@ -750,6 +712,7 @@ else:
   for the <strong>{next_sunday.strftime('%d %b %Y')}</strong> Sunday service.
 </div>
 """, unsafe_allow_html=True)
+
 
 
 # ═════════════════════════════════════════════════════════════
