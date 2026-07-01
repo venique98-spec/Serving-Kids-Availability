@@ -80,6 +80,32 @@ st.markdown(f"""
   .stApp {{ background:var(--cream); }}
   section[data-testid="stSidebar"] {{ display:none; }}
 
+  /* ── Force black text on all native Streamlit elements ──
+     Fixes invisible/white text on checkboxes, captions, markdown,
+     labels, and review text that otherwise inherit a light theme color. */
+  .stApp, .stApp p, .stApp span, .stApp label, .stApp div,
+  .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
+  .stCheckbox label, .stCheckbox label span, .stCheckbox p,
+  .stRadio label, .stRadio label span, .stRadio p,
+  .stSelectbox label, .stTextInput label, .stNumberInput label,
+  .stCaption, [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
+  [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
+  [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p {{
+    color: var(--dark) !important;
+  }}
+
+  /* Re-assert white text where it's intentional (hero, info/closed banners) */
+  .ukids-hero, .ukids-hero *,
+  .info-banner, .info-banner *,
+  .closed-banner, .closed-banner * {{
+    color: var(--white) !important;
+  }}
+
+  /* Buttons keep white text on their colored background */
+  .stButton button, .stButton button * {{
+    color: var(--white) !important;
+  }}
+
   .ukids-hero {{
     background:var(--teal); border-radius:20px;
     padding:34px 28px 28px; margin-bottom:28px;
