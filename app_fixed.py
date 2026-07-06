@@ -80,31 +80,25 @@ st.markdown(f"""
   .stApp {{ background:var(--cream); }}
   section[data-testid="stSidebar"] {{ display:none; }}
 
-  /* ── Force black text on all native Streamlit elements ──
-     Fixes invisible/white text on checkboxes, captions, markdown,
-     labels, and review text that otherwise inherit a light theme color. */
-  .stApp, .stApp p, .stApp span, .stApp label, .stApp div,
-  .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
-  .stCheckbox label, .stCheckbox label span, .stCheckbox p,
-  .stRadio label, .stRadio label span, .stRadio p,
-  .stSelectbox label, .stTextInput label, .stNumberInput label,
-  .stCaption, [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
-  [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
-  [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p {{
+  /* ── BLACK text on everything by default ── */
+  html, body, .stApp, .stApp * {{
     color: var(--dark) !important;
   }}
 
-  /* Re-assert white text where it's intentional (hero, info/closed banners) */
-  .ukids-hero, .ukids-hero *,
+  /* ── WHITE text on coloured backgrounds — must come AFTER the black rule ── */
+  .ukids-hero *,
   .info-banner, .info-banner *,
   .closed-banner, .closed-banner * {{
     color: var(--white) !important;
   }}
 
-  /* Buttons keep white text on their colored background */
-  .stButton button, .stButton button * {{
+  /* ── Buttons always white text ── */
+  .stButton > button, .stButton > button * {{
     color: var(--white) !important;
   }}
+
+  /* ── Section pill (yellow background) stays dark ── */
+  .section-pill {{ color: var(--dark) !important; }}
 
   .ukids-hero {{
     background:var(--teal); border-radius:20px;
@@ -667,9 +661,13 @@ if is_open:
 """, unsafe_allow_html=True)
                     st.caption("Which services can this child attend?")
 
+                    # Display label includes the date so parents know exactly
+                    # which Sunday they're confirming — stored value stays "Morning"/"Evening"
+                    sunday_display = weekly_tab_name(service_date_key)
                     selected_labels = []
                     for svc in date_labels:
-                        if st.checkbox(svc, key=f"svc_{slot}_{service_date_key}_{svc}"):
+                        display_label = f"{svc} — {sunday_display}"
+                        if st.checkbox(display_label, key=f"svc_{slot}_{service_date_key}_{svc}"):
                             selected_labels.append(svc)
                     kids_selected_map[slot] = set(selected_labels)
                     st.divider()
