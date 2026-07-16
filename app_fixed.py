@@ -1,7 +1,7 @@
 # app_fixed.py
 # uKids Kids Availability Form
 #
-# Window:  Monday 05:00 SAST  →  Wednesday 14:00 SAST
+# Window:  Monday 05:00 SAST  →  Sunday 23:00 SAST
 # Target:  Sunday of that same week
 #
 # Sheet tabs managed automatically:
@@ -452,7 +452,7 @@ def get_window():
     days_since_monday = now.weekday()
     monday            = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
     opening_dt        = monday.replace(hour=5,  minute=0, second=0, microsecond=0)
-    deadline_dt       = monday.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=2)  # Wednesday 14:00
+    deadline_dt       = monday.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=6)  # Sunday 23:00
     sunday_dt         = monday + timedelta(days=6)
     service_date_str  = sunday_dt.strftime("%Y-%m-%d")
     is_open           = opening_dt <= now < deadline_dt
@@ -720,7 +720,7 @@ else:
     days_to_next_monday = (7 - wday) % 7 or 7
     next_monday   = (now + timedelta(days=days_to_next_monday)).replace(hour=5, minute=0, second=0, microsecond=0)
     next_sunday   = next_monday + timedelta(days=6)
-    next_deadline = next_monday + timedelta(days=2, hours=9)  # Wednesday 14:00
+    next_deadline = next_monday + timedelta(days=6, hours=18)  # Sunday 23:00
 
     # Automatically build the weekly summary tab if it hasn't been created yet
     try:
