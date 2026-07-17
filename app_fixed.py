@@ -590,6 +590,23 @@ if is_open:
     if st.button("Refresh timer"):
         st.rerun()
 
+    st.markdown("---")
+    st.markdown("**Generate weekly summary early**")
+    st.caption(
+        "Builds the summary sheet from all responses received so far. "
+        "Run this any time during the week — or wait until the deadline and it happens automatically."
+    )
+    if st.button("Generate summary now", key="btn_generate_open"):
+        try:
+            with st.spinner(f"Building '{weekly_tab_name(service_date_key)}' from Master Log..."):
+                build_weekly_summary(service_date_key)
+            st.success(
+                f"Done! Sheet **'{weekly_tab_name(service_date_key)}'** updated with latest responses."
+            )
+        except Exception as e:
+            st.error(f"Could not generate summary: {e}")
+    st.markdown("---")
+
     date_labels = SERVICE_LABELS
 
     child_names = sorted({
@@ -736,6 +753,23 @@ else:
   for the <strong>{next_sunday.strftime('%d %b %Y')}</strong> Sunday service.
 </div>
 """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("**Generate weekly summary early**")
+    st.caption(
+        "The summary sheet is created automatically at the deadline, but you can "
+        "generate it early at any point during the week to see current responses."
+    )
+    if st.button("Generate summary now", key="btn_generate_early"):
+        try:
+            with st.spinner(f"Building '{weekly_tab_name(service_date_key)}' from Master Log..."):
+                build_weekly_summary(service_date_key)
+            st.success(
+                f"Done! Sheet **'{weekly_tab_name(service_date_key)}'** has been updated "
+                "with the latest responses. You can run this again at any time."
+            )
+        except Exception as e:
+            st.error(f"Could not generate summary: {e}")
 
 
 
